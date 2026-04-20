@@ -1,0 +1,4 @@
+ultralytics>=8.0.0
+opencv-python>=4.8.0
+Flask>=2.3.0
+Werkzeug>=2.3.0

@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control de Detección de Drones RPAS Micro</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome para iconos -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Estilos personalizados (Tema militar/seguridad) -->
+    <style>
+        :root {
+            --primary-dark: #1a1a1a;
+            --secondary-dark: #2d2d2d;
+            --accent-green: #00d4aa;
+            --accent-red: #ff4444;
+            --accent-yellow: #ffaa00;
+            --border-color: #404040;
+            --text-light: #e0e0e0;
+        }
+        
+        /* ============ TEMA GENERAL ============ */
+        body {
+            background-color: var(--primary-dark);
+            color: var(--text-light);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow-x: hidden;
+        }
+        
+        /* Barra de navegación */
+        .navbar {
+            background-color: var(--secondary-dark) !important;
+            border-bottom: 2px solid var(--accent-green);
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 10px rgba(0, 212, 170, 0.2);
+        }
+        
+        .navbar-brand {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--accent-green) !important;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .navbar-brand i {
+            font-size: 1.8rem;
+        }
+        
+        /* ============ CONTENEDOR PRINCIPAL ============ */
+        .main-container {
+            margin-top: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        /* ============ PESTAÑAS ============ */
+        .nav-tabs {
+            border-bottom: 2px solid var(--border-color);
+        }
+        
+        .nav-tabs .nav-link {
+            color: var(--text-light);
+            border: none;
+            border-bottom: 3px solid transparent;
+            font-weight: 600;
+            padding: 1rem 1.5rem;
+            transition: all 0.3s ease;
+        }
+        
+        .nav-tabs .nav-link:hover {
+            color: var(--accent-green);
+            border-bottom-color: var(--accent-green);
+        }
+        
+        .nav-tabs .nav-link.active {
+            color: var(--accent-green);
+            background-color: transparent;
+            border-bottom-color: var(--accent-green);
+        }
+        
+        .tab-content {
+            margin-top: 2rem;
+        }
+        
+        /* ============ TARJETAS ============ */
+        .card {
+            background-color: var(--secondary-dark);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+        }
+        
+        .card-header {
+            background-color: #1f1f1f;
+            border-bottom: 2px solid var(--border-color);
+            color: var(--accent-green);
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+        
+        .card-body {
+            padding: 1.5rem;
+        }
+        
+        /* ============ TAB 1: MONITOREO EN VIVO ============ */
+        #tab-live {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2rem;
+            align-items: flex-start;
+        }
+        
+        #live-feed-container {
+            flex: 1;
+            min-width: 400px;
+            position: relative;
+        }
+        
+        #video-stream {
+            width: 100%;
+            height: auto;
+            border: 2px solid var(--accent-green);
+            border-radius: 8px;
+            box-shadow: 0 0 20px rgba(0, 212, 170, 0.3);
+            background-color: #000;
+        }
+        
+        .stream-indicator {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .stream-indicator.live {
+            color: var(--accent-green);
+        }
+        
+        .stream-indicator.offline {
+            color: var(--accent-red);
+        }
+        
+        .pulse-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            animation: pulse 1s infinite;
+        }
+        
+        .stream-indicator.live .pulse-dot {
+            background-color: var(--accent-green);
+        }
+        
+        .stream-indicator.offline .pulse-dot {
+            background-color: var(--accent-red);
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        /* Panel de alertas */
+        #alert-panel {
+            flex: 0 0 350px;
+            position: sticky;
+            top: 20px;
+        }
+        
+        .alert-card .card-header {
+            background-color: #2a2a2a;
+        }
+        
+        .status-display {
+            font-size: 1.8rem;
+            font-weight: bold;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            text-align: center;
+            border: 2px solid var(--border-color);
+            transition: all 0.3s ease;
+        }
+        
+        .status-display.alert {
+            background-color: rgba(255, 68, 68, 0.1);
+            color: var(--accent-red);
+            border-color: var(--accent-red);
+        }
+        
+        .status-display.clear {
+            background-color: rgba(0, 212, 170, 0.1);
+            color: var(--accent-green);
+            border-color: var(--accent-green);
+        }
+        
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .info-row:last-child {
+            border-bottom: none;
+        }
+        
+        .info-label {
+            color: var(--text-light);
+            font-weight: 600;
+        }
+        
+        .info-value {
+            color: var(--accent-green);
+            font-weight: bold;
+        }
+        
+        /* ============ TAB 2: DETECCIÓN MANUAL ============ */
+        #tab-upload {
+            max-width: 1200px;
+        }
+        
+        .upload-area {
+            border: 2px dashed var(--accent-green);
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            background-color: rgba(0, 212, 170, 0.05);
+        }
+        
+        .upload-area:hover,
+        .upload-area.dragover {
+            background-color: rgba(0, 212, 170, 0.1);
+            border-color: var(--accent-yellow);
+            box-shadow: 0 0 20px rgba(0, 212, 170, 0.2);
+        }
+        
+        .upload-area i {
+            font-size: 3rem;
+            color: var(--accent-green);
+            margin-bottom: 1rem;
+        }
+        
+        .upload-area p {
+            margin-bottom: 0.5rem;
+        }
+        
+        .file-formats {
+            font-size: 0.9rem;
+            color: var(--text-light);
+            opacity: 0.7;
+        }
+        
+        #file-input {
+            display: none;
+        }
+        
+        /* Panel de resultados */
+        .results-panel {
+            margin-top: 2rem;
+            display: none;
+        }
+        
+        .results-panel.show {
+            display: block;
+        }
+        
+        #result-image {
+            max-width: 100%;
+            height: auto;
+            border: 2px solid var(--accent-green);
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+        
+        #result-video {
+            width: 100%;
+            height: auto;
+            border: 2px solid var(--accent-green);
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+        
+        /* ============ BOTONES ============ */
+        .btn {
+            font-weight: 600;
+            padding: 0.6rem 1.5rem;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+            border: none;
+        }
+        
+        .btn-primary {
+            background-color: var(--accent-green);
+            color: #000;
+        }
+        
+        .btn-primary:hover {
+            background-color: #00c499;
+            box-shadow: 0 0 15px rgba(0, 212, 170, 0.4);
+            transform: translateY(-2px);
+        }
+        
+        .btn-secondary {
+            background-color: var(--secondary-dark);
+            color: var(--accent-green);
+            border: 1px solid var(--accent-green);
+        }
+        
+        .btn-secondary:hover {
+            background-color: var(--accent-green);
+            color: #000;
+        }
+        
+        .btn-danger {
+            background-color: var(--accent-red);
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background-color: #dd3333;
+            box-shadow: 0 0 15px rgba(255, 68, 68, 0.4);
+        }
+        
+        /* ============ INDICADORES DE CARGA ============ */
+        .loading-spinner {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+        }
+        
+        .loading-spinner.show {
+            display: block;
+        }
+        
+        .spinner-border {
+            color: var(--accent-green);
+            width: 3rem;
+            height: 3rem;
+        }
+        
+        /* ============ ALERTAS ============ */
+        .alert {
+            border-radius: 8px;
+            border: none;
+        }
+        
+        .alert-success {
+            background-color: rgba(0, 212, 170, 0.1);
+            color: var(--accent-green);
+        }
+        
+        .alert-danger {
+            background-color: rgba(255, 68, 68, 0.1);
+            color: var(--accent-red);
+        }
+        
+        .alert-warning {
+            background-color: rgba(255, 170, 0, 0.1);
+            color: var(--accent-yellow);
+        }
+        
+        .alert-info {
+            background-color: rgba(0, 100, 200, 0.1);
+            color: #00d4ff;
+        }
+        
+        /* ============ FORMULARIOS ============ */
+        .form-control {
+            background-color: var(--primary-dark);
+            border: 1px solid var(--border-color);
+            color: var(--text-light);
+            border-radius: 6px;
+            padding: 0.75rem;
+        }
+        
+        .form-control:focus {
+            background-color: var(--primary-dark);
+            border-color: var(--accent-green);
+            color: var(--text-light);
+            box-shadow: 0 0 10px rgba(0, 212, 170, 0.2);
+        }
+        
+        .form-label {
+            color: var(--text-light);
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        
+        /* ============ FOOTER ============ */
+        footer {
+            background-color: var(--secondary-dark);
+            border-top: 2px solid var(--border-color);
+            padding: 1.5rem;
+            margin-top: 3rem;
+            text-align: center;
+            color: var(--text-light);
+        }
+        
+        footer a {
+            color: var(--accent-green);
+            text-decoration: none;
+        }
+        
+        footer a:hover {
+            text-decoration: underline;
+        }
+        
+        /* ============ RESPONSIVE ============ */
+        @media (max-width: 1024px) {
+            #alert-panel {
+                flex: 0 0 100%;
+                position: static;
+            }
+            
+            #tab-live {
+                flex-direction: column;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .navbar-brand {
+                font-size: 1.2rem;
+            }
+            
+            .nav-tabs .nav-link {
+                padding: 0.75rem 1rem;
+                font-size: 0.9rem;
+            }
+            
+            .upload-area i {
+                font-size: 2rem;
+            }
+        }
+        
+        /* ============ ESTADÍSTICAS ============ */
+        .stat-card {
+            background-color: #1f1f1f;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 1rem;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--accent-green);
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            color: var(--text-light);
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <!-- ============ BARRA DE NAVEGACIÓN ============ -->
+    <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-satellite"></i>
+                Control RPAS Micro
+            </a>
+            <span class="text-muted ms-auto">
+                <i class="fas fa-shield-alt"></i> Sistema de Detección de Drones
+            </span>
+        </div>
+    </nav>
+    
+    <!-- ============ CONTENIDO PRINCIPAL ============ -->
+    <div class="container-fluid main-container">
+        <!-- PESTAÑAS -->
+        <ul class="nav nav-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="live-tab" data-bs-toggle="tab" data-bs-target="#tab-live" 
+                        type="button" role="tab" aria-controls="tab-live" aria-selected="true">
+                    <i class="fas fa-video"></i> Monitoreo en Vivo
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="upload-tab" data-bs-toggle="tab" data-bs-target="#tab-upload" 
+                        type="button" role="tab" aria-controls="tab-upload" aria-selected="false">
+                    <i class="fas fa-upload"></i> Detección Manual
+                </button>
+            </li>
+        </ul>
+        
+        <!-- CONTENIDO DE PESTAÑAS -->
+        <div class="tab-content">
+            
+            <!-- ============ TAB 1: MONITOREO EN VIVO ============ -->
+            <div class="tab-pane fade show active" id="tab-live" role="tabpanel" aria-labelledby="live-tab">
+                <div id="tab-live" style="display: flex; flex-wrap: wrap; gap: 2rem; align-items: flex-start;">
+                    
+                    <!-- Reproductor de video en vivo -->
+                    <div id="live-feed-container" style="flex: 1; min-width: 400px; position: relative;">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fas fa-camera"></i> Stream en Vivo (RTSP)
+                            </div>
+                            <div class="card-body p-0">
+                                <!-- Video stream -->
+                                <img id="video-stream" src="/video_feed" alt="Stream RTSP en vivo">
+                                
+                                <!-- Indicador de transmisión -->
+                                <div class="stream-indicator live">
+                                    <span class="pulse-dot"></span>
+                                    EN VIVO
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Panel de alertas y información -->
+                    <div id="alert-panel" style="flex: 0 0 350px; position: sticky; top: 20px;">
+                        <div class="card alert-card">
+                            <div class="card-header">
+                                <i class="fas fa-bell"></i> Panel de Alertas
+                            </div>
+                            <div class="card-body">
+                                <!-- Estado de detección -->
+                                <div id="status-display" class="status-display clear">
+                                    ✓ Zona despejada
+                                </div>
+                                
+                                <!-- Información en tiempo real -->
+                                <div class="info-row">
+                                    <span class="info-label">Estado:</span>
+                                    <span class="info-value" id="status-text">Esperando...</span>
+                                </div>
+                                
+                                <div class="info-row">
+                                    <span class="info-label">Confianza Promedio:</span>
+                                    <span class="info-value" id="avg-confidence">0.0%</span>
+                                </div>
+                                
+                                <div class="info-row">
+                                    <span class="info-label">Objetos Detectados:</span>
+                                    <span class="info-value" id="detection-count">0</span>
+                                </div>
+                                
+                                <div class="info-row">
+                                    <span class="info-label">Última Actualización:</span>
+                                    <span class="info-value" id="last-update">-</span>
+                                </div>
+                                
+                                <!-- Línea separadora -->
+                                <hr style="border-color: var(--border-color); margin: 1rem 0;">
+                                
+                                <!-- Estadísticas -->
+                                <div class="stat-card">
+                                    <div class="stat-value" id="session-detections">0</div>
+                                    <div class="stat-label">Detecciones en Sesión</div>
+                                </div>
+                                
+                                <div class="stat-card">
+                                    <div class="stat-value" id="avg-conf-session">0%</div>
+                                    <div class="stat-label">Confianza Promedio Sesión</div>
+                                </div>
+                                
+                                <!-- Botones de control -->
+                                <div style="margin-top: 1rem;">
+                                    <button class="btn btn-secondary w-100 mb-2" onclick="refreshAlertStatus()">
+                                        <i class="fas fa-sync"></i> Actualizar
+                                    </button>
+                                    <button class="btn btn-secondary w-100" onclick="downloadHistory()">
+                                        <i class="fas fa-download"></i> Descargar Historial
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- ============ TAB 2: DETECCIÓN MANUAL ============ -->
+            <div class="tab-pane fade" id="tab-upload" role="tabpanel" aria-labelledby="upload-tab">
+                <div style="max-width: 1200px; margin: 0 auto;">
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="fas fa-file-upload"></i> Subir Archivo para Procesamiento
+                        </div>
+                        <div class="card-body">
+                            <!-- Zona de carga -->
+                            <div class="upload-area" id="upload-area" ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                                <p><strong>Arrastra tu archivo aquí o haz clic para seleccionar</strong></p>
+                                <p class="file-formats">📷 Imágenes: JPG, PNG | 🎬 Videos: MP4, AVI, MOV</p>
+                            </div>
+                            
+                            <!-- Input de archivo oculto -->
+                            <input type="file" id="file-input" accept=".jpg,.jpeg,.png,.mp4,.avi,.mov" onchange="handleFileSelect(event)">
+                            
+                            <!-- Indicador de carga -->
+                            <div id="loading-spinner" class="loading-spinner">
+                                <div class="spinner-border" role="status">
+                                    <span class="visually-hidden">Procesando...</span>
+                                </div>
+                                <p style="margin-top: 1rem; color: var(--accent-green);">Procesando archivo con YOLO...</p>
+                            </div>
+                            
+                            <!-- Alertas -->
+                            <div id="alert-messages"></div>
+                            
+                            <!-- Panel de resultados -->
+                            <div id="results-panel" class="results-panel">
+                                <h4 style="color: var(--accent-green); margin-bottom: 1rem;">
+                                    <i class="fas fa-check-circle"></i> Resultados del Procesamiento
+                                </h4>
+                                
+                                <!-- Imagen procesada -->
+                                <div id="image-result-container" style="display: none;">
+                                    <img id="result-image" alt="Imagen procesada">
+                                    <div class="alert alert-success">
+                                        <strong>Procesamiento completado:</strong><br>
+                                        Detecciones: <span id="result-detections">0</span> | 
+                                        Confianza Promedio: <span id="result-confidence">0%</span>
+                                    </div>
+                                    <button class="btn btn-primary" onclick="resetUploadForm()">
+                                        <i class="fas fa-redo"></i> Procesar otro archivo
+                                    </button>
+                                </div>
+                                
+                                <!-- Video procesado -->
+                                <div id="video-result-container" style="display: none;">
+                                    <video id="result-video" controls style="width: 100%; border: 2px solid var(--accent-green); border-radius: 8px; margin-bottom: 1rem;"></video>
+                                    <div class="alert alert-success">
+                                        <strong>Video procesado exitosamente:</strong><br>
+                                        Frames: <span id="result-frames">0</span> | 
+                                        Detecciones Totales: <span id="result-total-detections">0</span> | 
+                                        Confianza Promedio: <span id="result-video-confidence">0%</span>
+                                    </div>
+                                    <div style="margin-top: 1rem;">
+                                        <a id="download-link" href="#" class="btn btn-primary me-2">
+                                            <i class="fas fa-download"></i> Descargar Video Procesado
+                                        </a>
+                                        <button class="btn btn-secondary" onclick="resetUploadForm()">
+                                            <i class="fas fa-redo"></i> Procesar otro archivo
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ============ FOOTER ============ -->
+    <footer>
+        <p><i class="fas fa-copyright"></i> 2026 Sistema de Detección de Drones RPAS Micro</p>
+        <small>Inferencia en Vivo</small>
+    </footer>
+    
+    <!-- ============ SCRIPTS ============ -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        // ============ CONFIGURACIÓN GLOBAL ============
+        const ALERT_UPDATE_INTERVAL = 1000; // Actualizar alertas cada 1 segundo
+        let sessionStats = {
+            totalDetections: 0,
+            totalConfidence: 0,
+            detectionFrames: 0
+        };
+        
+        // ============ INICIALIZACIÓN ============
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('[INFO] Interfaz cargada correctamente');
+            
+            // Iniciar actualización de alertas
+            startAlertUpdates();
+            
+            // Configurar eventos de carga de archivos
+            setupFileUploadEvents();
+        });
+        
+        // ============ ACTUALIZACIÓN DE ALERTAS EN TIEMPO REAL ============
+        /**
+         * Inicia la actualización periódica del estado de detecciones
+         * Se ejecuta cada 1 segundo para reflejar cambios en vivo
+         */
+        function startAlertUpdates() {
+            setInterval(refreshAlertStatus, ALERT_UPDATE_INTERVAL);
+            refreshAlertStatus(); // Primera actualización inmediata
+        }
+        
+        /**
+         * Actualiza el panel de alertas mediante AJAX
+         * Obtiene el estado actual del servidor y actualiza la UI
+         */
+        function refreshAlertStatus() {
+            fetch('/detection_status')
+                .then(response => response.json())
+                .then(data => {
+                    // Actualizar estado principal
+                    const statusDisplay = document.getElementById('status-display');
+                    const statusText = document.getElementById('status-text');
+                    const avgConfidence = document.getElementById('avg-confidence');
+                    const detectionCount = document.getElementById('detection-count');
+                    const lastUpdate = document.getElementById('last-update');
+                    
+                    // Cambiar color según estado
+                    if (data.detected) {
+                        statusDisplay.classList.remove('clear');
+                        statusDisplay.classList.add('alert');
+                        statusDisplay.innerHTML = '🚨 ALERTA: Dron detectado';
+                        statusText.textContent = 'ALERTA ACTIVA';
+                    } else {
+                        statusDisplay.classList.remove('alert');
+                        statusDisplay.classList.add('clear');
+                        statusDisplay.innerHTML = '✓ Zona despejada';
+                        statusText.textContent = 'Normal';
+                    }
+                    
+                    // Actualizar valores numéricos
+                    avgConfidence.textContent = (data.avg_confidence * 100).toFixed(1) + '%';
+                    detectionCount.textContent = data.detection_count;
+                    
+                    // Formato de hora legible
+                    if (data.last_update) {
+                        const date = new Date(data.last_update);
+                        lastUpdate.textContent = date.toLocaleTimeString('es-ES');
+                    }
+                    
+                    // Actualizar estadísticas de sesión
+                    if (data.detected && data.detection_count > 0) {
+                        sessionStats.totalDetections += data.detection_count;
+                        sessionStats.totalConfidence += data.avg_confidence;
+                        sessionStats.detectionFrames++;
+                    }
+                    
+                    const avgSessionConf = sessionStats.detectionFrames > 0 
+                        ? (sessionStats.totalConfidence / sessionStats.detectionFrames * 100).toFixed(1)
+                        : 0;
+                    
+                    document.getElementById('session-detections').textContent = sessionStats.totalDetections;
+                    document.getElementById('avg-conf-session').textContent = avgSessionConf + '%';
+                })
+                .catch(error => {
+                    console.error('[ERROR] No se pudo obtener estado de detecciones:', error);
+                    document.getElementById('status-text').textContent = 'Error de conexión';
+                });
+        }
+        
+        // ============ MANEJO DE CARGA DE ARCHIVOS ============
+        /**
+         * Configura los eventos para manejo de archivos (drag & drop)
+         */
+        function setupFileUploadEvents() {
+            const uploadArea = document.getElementById('upload-area');
+            const fileInput = document.getElementById('file-input');
+            
+            // Click en área de carga
+            uploadArea.addEventListener('click', () => fileInput.click());
+            
+            // Prevenir comportamiento por defecto del navegador
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        }
+        
+        /**
+         * Maneja el evento de arrastrar archivo sobre el área
+         */
+        function handleDragOver(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            document.getElementById('upload-area').classList.add('dragover');
+        }
+        
+        /**
+         * Maneja el evento de salir del área de arrastre
+         */
+        function handleDragLeave(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            document.getElementById('upload-area').classList.remove('dragover');
+        }
+        
+        /**
+         * Maneja la caída del archivo (drag & drop)
+         */
+        function handleDrop(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            document.getElementById('upload-area').classList.remove('dragover');
+            
+            const files = event.dataTransfer.files;
+            if (files.length > 0) {
+                document.getElementById('file-input').files = files;
+                processFile(files[0]);
+            }
+        }
+        
+        /**
+         * Maneja la selección de archivo por input
+         */
+        function handleFileSelect(event) {
+            const files = event.target.files;
+            if (files.length > 0) {
+                processFile(files[0]);
+            }
+        }
+        
+        /**
+         * Procesa el archivo seleccionado: valida, envía al servidor, muestra resultado
+         */
+        function processFile(file) {
+            // Validaciones
+            const allowedExtensions = ['jpg', 'jpeg', 'png', 'mp4', 'avi', 'mov'];
+            const fileExtension = file.name.split('.').pop().toLowerCase();
+            
+            if (!allowedExtensions.includes(fileExtension)) {
+                showAlert('error', 'Tipo de archivo no permitido. Usa: JPG, PNG, MP4, AVI, MOV');
+                return;
+            }
+            
+            const maxSize = 500 * 1024 * 1024; // 500MB
+            if (file.size > maxSize) {
+                showAlert('error', 'El archivo es muy grande. Máximo: 500MB');
+                return;
+            }
+            
+            // Mostrar indicador de carga
+            document.getElementById('loading-spinner').classList.add('show');
+            document.getElementById('results-panel').classList.remove('show');
+            
+            // Crear FormData y enviar
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            console.log('[INFO] Enviando archivo:', file.name);
+            
+            fetch('/upload_detect', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('[SUCCESS] Respuesta del servidor:', data);
+                document.getElementById('loading-spinner').classList.remove('show');
+                
+                if (data.success) {
+                    displayResults(data, fileExtension);
+                    showAlert('success', 'Archivo procesado exitosamente con YOLO.');
+                } else {
+                    showAlert('error', data.error || 'Error desconocido al procesar archivo');
+                }
+            })
+            .catch(error => {
+                console.error('[ERROR] Error en la solicitud:', error);
+                document.getElementById('loading-spinner').classList.remove('show');
+                showAlert('error', 'Error al enviar archivo: ' + error.message);
+            });
+        }
+        
+        /**
+         * Muestra los resultados del procesamiento (imagen o video)
+         */
+        function displayResults(data, fileExtension) {
+            const resultsPanel = document.getElementById('results-panel');
+            const imageContainer = document.getElementById('image-result-container');
+            const videoContainer = document.getElementById('video-result-container');
+            
+            if (['jpg', 'jpeg', 'png'].includes(fileExtension)) {
+                // Mostrar imagen procesada
+                document.getElementById('result-image').src = data.image;
+                document.getElementById('result-detections').textContent = data.detections_count;
+                document.getElementById('result-confidence').textContent = (data.avg_confidence * 100).toFixed(1) + '%';
+                
+                imageContainer.style.display = 'block';
+                videoContainer.style.display = 'none';
+            } else if (['mp4', 'avi', 'mov'].includes(fileExtension)) {
+                // Mostrar video procesado
+                document.getElementById('result-video').src = data.video_url;
+                document.getElementById('result-frames').textContent = data.frames_processed;
+                document.getElementById('result-total-detections').textContent = data.total_detections;
+                document.getElementById('result-video-confidence').textContent = (data.avg_confidence * 100).toFixed(1) + '%';
+                document.getElementById('download-link').href = data.video_url;
+                
+                imageContainer.style.display = 'none';
+                videoContainer.style.display = 'block';
+            }
+            
+            resultsPanel.classList.add('show');
+        }
+        
+        /**
+         * Muestra una alerta (success, error, warning, info)
+         */
+        function showAlert(type, message) {
+            const alertContainer = document.getElementById('alert-messages');
+            const alertHtml = `
+                <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close" 
+                            style="filter: brightness(0.8);"></button>
+                </div>
+            `;
+            alertContainer.innerHTML = alertHtml;
+        }
+        
+        /**
+         * Reinicia el formulario de carga
+         */
+        function resetUploadForm() {
+            document.getElementById('file-input').value = '';
+            document.getElementById('alert-messages').innerHTML = '';
+            document.getElementById('results-panel').classList.remove('show');
+            document.getElementById('image-result-container').style.display = 'none';
+            document.getElementById('video-result-container').style.display = 'none';
+        }
+        
+        /**
+         * Descarga el historial de detecciones en formato JSON
+         */
+        function downloadHistory() {
+            console.log('[INFO] Descargando historial de detecciones...');
+            
+            fetch('/history')
+                .then(response => response.json())
+                .then(data => {
+                    const jsonString = JSON.stringify(data, null, 2);
+                    const blob = new Blob([jsonString], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `detecciones_${new Date().toISOString().split('T')[0]}.json`;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                    
+                    showAlert('success', `Descargado historial con ${data.length} detecciones`);
+                })
+                .catch(error => {
+                    console.error('[ERROR] No se pudo descargar historial:', error);
+                    showAlert('error', 'Error al descargar historial');
+                });
+        }
+    </script>
+</body>
+</html>
