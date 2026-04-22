@@ -16,6 +16,11 @@ import time
 from collections import deque
 from config import FLASK_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG
 
+try:
+    import torch
+except Exception:  # pragma: no cover
+    torch = None
+
 # ======================== CONFIGURACIÓN ========================
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = FLASK_CONFIG['max_content_length']  # Max upload 500MB
@@ -28,18 +33,36 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 # Variables globales para streaming
 rtsp_url = RTSP_CONFIG['url']
 detection_buffer = deque(maxlen=10)  # Últimas 10 detecciones para panel de alertas
+camera_source_mode = "fixed"  # "fixed" | "ptz"
+state_lock = threading.Lock()
+stream_lock = threading.Lock()
+
+latest_annotated_jpeg = None  # type: bytes | None
+latest_annotated_ts = None  # type: float | None
+
+_rtsp_reader = None
+_live_processor = None
+_live_threads_started = False
 current_detection_state = {
     'status': 'Zona despejada',
     'avg_confidence': 0.0,
     'detected': False,
     'last_update': None,
-    'detection_count': 0
+    'detection_count': 0,
+    'camera_source_mode': camera_source_mode,
 }
 
 # ======================== INICIALIZACIÓN YOLO ========================
 def load_yolo_model():
     """Carga modelo YOLO en GPU (cuda:0) para RTX 4060."""
     try:
+        if YOLO_CONFIG.get("device") != "cuda:0":
+            raise RuntimeError("YOLO_CONFIG['device'] debe ser 'cuda:0' para ejecutar estrictamente en GPU.")
+        if torch is None:
+            raise RuntimeError("PyTorch no está disponible. Instala torch con soporte CUDA para ejecutar en GPU.")
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA no está disponible. Este prototipo requiere ejecución estricta en GPU (cuda:0).")
+
         print("[INFO] Cargando modelo YOLO en GPU...")
         model = YOLO(YOLO_CONFIG['model_path'])
         model.to(YOLO_CONFIG['device'])
@@ -152,42 +175,151 @@ def draw_detections(frame, results):
     
     return frame, detection_list
 
-def process_rtsp_stream():
-    """Generador para transmitir video RTSP con detecciones en tiempo real (multipart/x-mixed-replace)."""
-    cap = None
-    frame_count = 0
-    detection_times = deque(maxlen=30)  # Últimos 30 frames
-    
-    try:
-        print(f"[INFO] Conectando a RTSP: {rtsp_url}")
-        cap = cv2.VideoCapture(rtsp_url)
-        
-        if not cap.isOpened():
-            print("[WARNING] No se pudo conectar a RTSP. Usando webcam por defecto (índice 0)")
-            cap = cv2.VideoCapture(0)
-        
-        # Configurar propiedades de captura
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-        cap.set(cv2.CAP_PROP_FPS, 30)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        
-        while True:
-            ret, frame = cap.read()
-            
-            if not ret:
-                print("[WARNING] No se pudo leer frame. Reiniciando conexión...")
-                cap.release()
-                time.sleep(2)
-                cap = cv2.VideoCapture(rtsp_url)
+def enviar_comando_ptz(direction: str, speed: float = 0.5):
+    """
+    Simulación de envío de comando PTZ.
+    En integración real, aquí iría ONVIF / SDK del fabricante / HTTP API.
+    """
+    print(f"[PTZ] Comando simulado: direction={direction} speed={speed}")
+
+
+def _bbox_off_center(frame_w: int, frame_h: int, bbox_xyxy):
+    x1, y1, x2, y2 = bbox_xyxy
+    cx = (x1 + x2) / 2.0
+    cy = (y1 + y2) / 2.0
+
+    # Zona central tolerada (rectángulo). Fuera de ella => pedir movimiento PTZ.
+    tol_w = 0.20 * frame_w
+    tol_h = 0.20 * frame_h
+    center_x = frame_w / 2.0
+    center_y = frame_h / 2.0
+
+    dx = cx - center_x
+    dy = cy - center_y
+
+    if abs(dx) <= tol_w and abs(dy) <= tol_h:
+        return None
+
+    if abs(dx) >= abs(dy):
+        return "left" if dx < 0 else "right"
+    return "up" if dy < 0 else "down"
+
+
+class _RTSPLatestFrameReader:
+    """
+    Lee RTSP en un hilo dedicado y conserva sólo el último frame.
+    Esto "dropea" frames automáticamente si hay lag para mantener tiempo real.
+    """
+
+    def __init__(self, url: str):
+        self.url = url
+        self._lock = threading.Lock()
+        self._frame = None
+        self._ts = None
+        self._stop = threading.Event()
+        self._thread = None
+
+    def start(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=2)
+
+    def get_latest(self):
+        with self._lock:
+            return self._frame, self._ts
+
+    def _run(self):
+        cap = None
+        try:
+            while not self._stop.is_set():
+                if cap is None or not cap.isOpened():
+                    print(f"[INFO] Conectando a RTSP: {self.url}")
+                    cap = cv2.VideoCapture(self.url)
+                    if cap.isOpened():
+                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, VIDEO_CONFIG['width'])
+                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, VIDEO_CONFIG['height'])
+                        cap.set(cv2.CAP_PROP_FPS, VIDEO_CONFIG['fps'])
+                        cap.set(cv2.CAP_PROP_BUFFERSIZE, RTSP_CONFIG.get("buffer_size", 1))
+                    else:
+                        print("[WARNING] No se pudo abrir RTSP. Reintentando...")
+                        time.sleep(1.0)
+                        continue
+
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    print("[WARNING] Lectura RTSP fallida. Reintentando conexión...")
+                    try:
+                        cap.release()
+                    except Exception:
+                        pass
+                    cap = None
+                    time.sleep(0.5)
+                    continue
+
+                ts = time.time()
+                with self._lock:
+                    self._frame = frame
+                    self._ts = ts
+        finally:
+            if cap is not None:
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+
+
+class _LiveVideoProcessor:
+    """Procesa el último frame RTSP, ejecuta YOLO en GPU y conserva el último JPEG anotado."""
+
+    def __init__(self, reader: _RTSPLatestFrameReader):
+        self.reader = reader
+        self._stop = threading.Event()
+        self._thread = None
+        self._last_ts = None
+        self._frame_count = 0
+        self._detection_times = deque(maxlen=30)
+
+    def start(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=2)
+
+    def _run(self):
+        global latest_annotated_jpeg, latest_annotated_ts
+
+        while not self._stop.is_set():
+            frame, ts = self.reader.get_latest()
+            if frame is None or ts is None:
+                time.sleep(0.02)
                 continue
-            
-            # Redimensionar para optimizar (inferencia más rápida)
-            frame = cv2.resize(frame, (1280, 720))
-            frame_count += 1
-            
-            # Realizar inferencia YOLO
-            if yolo_model is not None:
+            if ts == self._last_ts:
+                time.sleep(0.005)
+                continue
+            self._last_ts = ts
+
+            try:
+                frame = cv2.resize(frame, (VIDEO_CONFIG['width'], VIDEO_CONFIG['height']))
+            except Exception:
+                pass
+
+            self._frame_count += 1
+
+            detection_list = []
+            if yolo_model is not None and (self._frame_count % max(1, VIDEO_CONFIG.get("inference_interval", 1)) == 0):
                 try:
                     t0 = time.time()
                     results = yolo_model(
@@ -196,56 +328,97 @@ def process_rtsp_stream():
                         conf=YOLO_CONFIG['confidence'],
                         verbose=YOLO_CONFIG['verbose'],
                     )
-                    inference_time = time.time() - t0
-                    detection_times.append(inference_time)
-                    
-                    # Procesar detecciones
+                    self._detection_times.append(time.time() - t0)
                     frame, detection_list = draw_detections(frame, results)
-                    
-                    # Actualizar estado global de detecciones
-                    if detection_list:
-                        avg_conf = np.mean([d['confidence'] for d in detection_list])
-                        current_detection_state['status'] = '🚨 ALERTA: Dron detectado'
-                        current_detection_state['avg_confidence'] = avg_conf
-                        current_detection_state['detected'] = True
-                        current_detection_state['detection_count'] = len(detection_list)
-                    else:
-                        current_detection_state['status'] = '✓ Zona despejada'
-                        current_detection_state['avg_confidence'] = 0.0
-                        current_detection_state['detected'] = False
-                        current_detection_state['detection_count'] = 0
-                    
-                    current_detection_state['last_update'] = datetime.now().isoformat()
-                    
-                    # Mostrar FPS en el frame
-                    if detection_times:
-                        avg_inf_time = np.mean(list(detection_times))
-                        fps = 1.0 / avg_inf_time if avg_inf_time > 0 else 0
-                        cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                    
                 except Exception as e:
                     print(f"[ERROR] En inferencia YOLO: {e}")
                     cv2.putText(frame, "Error en inferencia", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            
-            # Codificar frame a JPEG
-            ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, VIDEO_CONFIG['jpeg_quality']])
-            frame_bytes = buffer.tobytes()
-            
-            # Formato multipart/x-mixed-replace para streaming
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n'
-                   b'Content-Length: ' + str(len(frame_bytes)).encode() + b'\r\n\r\n' +
-                   frame_bytes + b'\r\n')
-            
-            # Limitar a 30 FPS para no sobrecargar
-            time.sleep(0.033)
-    
-    except Exception as e:
-        print(f"[ERROR] En stream RTSP: {e}")
-    
-    finally:
-        if cap is not None:
-            cap.release()
+
+            # Regla de adaptabilidad: PTZ si el bbox no está centrado.
+            with state_lock:
+                mode = camera_source_mode
+            if mode == "ptz" and detection_list:
+                best = max(detection_list, key=lambda d: d["confidence"])
+                h, w = frame.shape[:2]
+                direction = _bbox_off_center(w, h, best["bbox"])
+                if direction:
+                    enviar_comando_ptz(direction=direction, speed=0.6)
+
+            with state_lock:
+                current_detection_state["camera_source_mode"] = camera_source_mode
+                current_detection_state["last_update"] = datetime.now().isoformat()
+                if detection_list:
+                    avg_conf = float(np.mean([d["confidence"] for d in detection_list]))
+                    current_detection_state["status"] = "Alerta: Dron detectado"
+                    current_detection_state["avg_confidence"] = avg_conf
+                    current_detection_state["detected"] = True
+                    current_detection_state["detection_count"] = len(detection_list)
+                else:
+                    current_detection_state["status"] = "Zona despejada"
+                    current_detection_state["avg_confidence"] = 0.0
+                    current_detection_state["detected"] = False
+                    current_detection_state["detection_count"] = 0
+
+            if self._detection_times:
+                avg_inf_time = float(np.mean(list(self._detection_times)))
+                fps = 1.0 / avg_inf_time if avg_inf_time > 0 else 0.0
+                cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+            ok, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, VIDEO_CONFIG['jpeg_quality']])
+            if not ok:
+                time.sleep(0.01)
+                continue
+
+            with stream_lock:
+                latest_annotated_jpeg = buffer.tobytes()
+                latest_annotated_ts = ts
+
+
+def _ensure_live_threads_started():
+    global _rtsp_reader, _live_processor, _live_threads_started
+    if _live_threads_started:
+        return
+    _rtsp_reader = _RTSPLatestFrameReader(rtsp_url)
+    _live_processor = _LiveVideoProcessor(_rtsp_reader)
+    _rtsp_reader.start()
+    _live_processor.start()
+    _live_threads_started = True
+
+
+def process_rtsp_stream():
+    """Generador multipart/x-mixed-replace: entrega el último frame anotado (tiempo real con drop de frames)."""
+    _ensure_live_threads_started()
+
+    placeholder = np.zeros((VIDEO_CONFIG['height'], VIDEO_CONFIG['width'], 3), dtype=np.uint8)
+    cv2.putText(placeholder, "Conectando a RTSP...", (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+    _, ph_buf = cv2.imencode(".jpg", placeholder, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    ph_bytes = ph_buf.tobytes()
+
+    last_sent_ts = None
+    while True:
+        with stream_lock:
+            jpeg = latest_annotated_jpeg
+            ts = latest_annotated_ts
+
+        if jpeg is None or ts is None:
+            frame_bytes = ph_bytes
+            time.sleep(0.05)
+        else:
+            if ts == last_sent_ts:
+                time.sleep(0.01)
+                continue
+            last_sent_ts = ts
+            frame_bytes = jpeg
+
+        yield (
+            b"--frame\r\n"
+            b"Content-Type: image/jpeg\r\n"
+            b"Content-Length: "
+            + str(len(frame_bytes)).encode()
+            + b"\r\n\r\n"
+            + frame_bytes
+            + b"\r\n"
+        )
 
 def allowed_file(filename):
     """Verifica que el archivo tenga extensión permitida."""
@@ -261,15 +434,37 @@ def index():
 @app.route('/video_feed')
 def video_feed():
     """Ruta para streaming de video RTSP con detecciones en tiempo real."""
+    source = (request.args.get("source") or "").strip().lower()
+    if source in {"fixed", "ptz"}:
+        global camera_source_mode
+        with state_lock:
+            camera_source_mode = source
+            current_detection_state["camera_source_mode"] = camera_source_mode
     return Response(
         process_rtsp_stream(),
         mimetype='multipart/x-mixed-replace; boundary=frame'
     )
 
+@app.route('/set_camera_source', methods=['POST'])
+def set_camera_source():
+    """Endpoint para cambiar el origen/mode de cámara (Fija vs PTZ) desde la UI."""
+    payload = request.get_json(silent=True) or request.form or {}
+    source = str(payload.get("source", "")).strip().lower()
+    if source not in {"fixed", "ptz"}:
+        return jsonify({"success": False, "error": "Modo inválido. Usa 'fixed' o 'ptz'."}), 400
+
+    global camera_source_mode
+    with state_lock:
+        camera_source_mode = source
+        current_detection_state["camera_source_mode"] = camera_source_mode
+
+    return jsonify({"success": True, "camera_source_mode": camera_source_mode})
+
 @app.route('/detection_status')
 def detection_status():
     """Endpoint AJAX para obtener estado actual de detecciones."""
-    return jsonify(current_detection_state)
+    with state_lock:
+        return jsonify(dict(current_detection_state))
 
 @app.route('/uploads/<path:filename>')
 def uploaded_file(filename):
