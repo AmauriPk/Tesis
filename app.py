@@ -1,186 +1,166 @@
-# app.py
-# Servidor Flask para interfaz web de detección de drones RPAS Micro
-# Backend: YOLO modelo en GPU (RTX 4060), streaming RTSP, procesamiento de archivos
-# Frontend: HTML5 + Bootstrap, dos pestañas (Monitoreo en Vivo y Detección Manual)
+from __future__ import annotations
 
 import os
-import cv2
-import numpy as np
-from flask import Flask, render_template, request, jsonify, Response, send_from_directory
-from ultralytics import YOLO
-from werkzeug.utils import secure_filename
-import sqlite3
-from datetime import datetime
+import queue
 import threading
 import time
-from collections import deque
-from config import FLASK_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG
+from datetime import datetime
+from functools import wraps
+
+import cv2
+import numpy as np
+from flask import (
+    Flask,
+    Response,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
+from flask_login import (
+    LoginManager,
+    current_user,
+    login_required,
+    login_user,
+    logout_user,
+)
+from ultralytics import YOLO
+from werkzeug.utils import secure_filename
 
 try:
     import torch
 except Exception:  # pragma: no cover
     torch = None
 
-# ======================== CONFIGURACIÓN ========================
+from config import FLASK_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG
+from models import CameraConfig, User, db
+from ptz_controller import PTZController
+
+# ======================== APP / DB ========================
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = FLASK_CONFIG['max_content_length']  # Max upload 500MB
-app.config['UPLOAD_FOLDER'] = STORAGE_CONFIG['upload_folder']
-app.config['ALLOWED_EXTENSIONS'] = STORAGE_CONFIG['allowed_extensions']
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
 
-# Crear directorio de uploads si no existe
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///app.db")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# Variables globales para streaming
-rtsp_url = RTSP_CONFIG['url']
-detection_buffer = deque(maxlen=10)  # Últimas 10 detecciones para panel de alertas
-camera_source_mode = "fixed"  # "fixed" | "ptz"
-state_lock = threading.Lock()
-stream_lock = threading.Lock()
+app.config["MAX_CONTENT_LENGTH"] = FLASK_CONFIG["max_content_length"]
+app.config["UPLOAD_FOLDER"] = STORAGE_CONFIG.get("upload_folder", "uploads")
+app.config["RESULTS_FOLDER"] = os.path.join("static", "results")
+app.config["ALLOWED_EXTENSIONS"] = STORAGE_CONFIG["allowed_extensions"]
 
-latest_annotated_jpeg = None  # type: bytes | None
-latest_annotated_ts = None  # type: float | None
+os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
+os.makedirs(app.config["RESULTS_FOLDER"], exist_ok=True)
 
-_rtsp_reader = None
-_live_processor = None
-_live_threads_started = False
-current_detection_state = {
-    'status': 'Zona despejada',
-    'avg_confidence': 0.0,
-    'detected': False,
-    'last_update': None,
-    'detection_count': 0,
-    'camera_source_mode': camera_source_mode,
-}
+db.init_app(app)
 
-# ======================== INICIALIZACIÓN YOLO ========================
-def load_yolo_model():
-    """Carga modelo YOLO en GPU (cuda:0) para RTX 4060."""
+login_manager = LoginManager()
+login_manager.login_view = "login"
+login_manager.init_app(app)
+
+
+@login_manager.user_loader
+def load_user(user_id: str):
+    return db.session.get(User, int(user_id))
+
+
+def role_required(*roles: str):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if not current_user.is_authenticated:
+                return login_manager.unauthorized()
+            if current_user.role not in roles:
+                flash("Acceso denegado: permisos insuficientes.", "danger")
+                return redirect(url_for("index"))
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in app.config["ALLOWED_EXTENSIONS"]
+
+
+def get_or_create_camera_config() -> CameraConfig:
+    cfg = CameraConfig.query.order_by(CameraConfig.id.asc()).first()
+    if cfg:
+        return cfg
+
+    cfg = CameraConfig(
+        camera_type="fixed",
+        rtsp_url=RTSP_CONFIG.get("url"),
+        rtsp_username=RTSP_CONFIG.get("username"),
+        rtsp_password=RTSP_CONFIG.get("password"),
+        onvif_host=None,
+        onvif_port=80,
+        onvif_username=None,
+        onvif_password=None,
+    )
+    db.session.add(cfg)
+    db.session.commit()
+    return cfg
+
+
+def bootstrap_users() -> None:
+    if User.query.count() > 0:
+        return
+
+    admin = User(username="admin", role="admin")
+    admin.set_password(os.environ.get("DEFAULT_ADMIN_PASSWORD", "admin123"))
+    operator = User(username="operador", role="operator")
+    operator.set_password(os.environ.get("DEFAULT_OPERATOR_PASSWORD", "operador123"))
+
+    db.session.add(admin)
+    db.session.add(operator)
+    db.session.commit()
+
+    print("[BOOTSTRAP] Usuarios creados:")
+    print("  - admin / admin123 (role=admin)")
+    print("  - operador / operador123 (role=operator)")
+
+
+# ======================== YOLO (GPU strict) ========================
+def load_yolo_model() -> YOLO | None:
     try:
         if YOLO_CONFIG.get("device") != "cuda:0":
             raise RuntimeError("YOLO_CONFIG['device'] debe ser 'cuda:0' para ejecutar estrictamente en GPU.")
         if torch is None:
-            raise RuntimeError("PyTorch no está disponible. Instala torch con soporte CUDA para ejecutar en GPU.")
+            raise RuntimeError("PyTorch no está disponible.")
         if not torch.cuda.is_available():
-            raise RuntimeError("CUDA no está disponible. Este prototipo requiere ejecución estricta en GPU (cuda:0).")
+            raise RuntimeError("CUDA no está disponible. Este prototipo requiere GPU (cuda:0).")
 
-        print("[INFO] Cargando modelo YOLO en GPU...")
-        model = YOLO(YOLO_CONFIG['model_path'])
-        model.to(YOLO_CONFIG['device'])
-        print("[SUCCESS] Modelo YOLO cargado en GPU correctamente.")
+        model = YOLO(YOLO_CONFIG["model_path"])
+        model.to(YOLO_CONFIG["device"])
+        print("[SUCCESS] Modelo YOLO cargado en GPU (cuda:0).")
         return model
     except Exception as e:
-        print(f"[ERROR] No se pudo cargar el modelo YOLO: {e}")
+        print(f"[ERROR] No se pudo cargar YOLO: {e}")
         return None
 
-# Cargar modelo globalmente
+
 yolo_model = load_yolo_model()
 
-# ======================== BASE DE DATOS ========================
-def init_db():
-    """Inicializa tabla SQLite para historial de detecciones."""
-    db_path = 'detections.db'
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS detections (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fecha TEXT,
-            hora TEXT,
-            confianza REAL,
-            fuente TEXT,
-            x1 INTEGER,
-            y1 INTEGER,
-            x2 INTEGER,
-            y2 INTEGER,
-            image_path TEXT
-        )
-    ''')
-    cursor.execute('PRAGMA table_info(detections)')
-    columns = [row[1] for row in cursor.fetchall()]
-    if 'fuente' not in columns:
-        cursor.execute("ALTER TABLE detections ADD COLUMN fuente TEXT DEFAULT 'rtsp'")
-    if 'image_path' not in columns:
-        cursor.execute("ALTER TABLE detections ADD COLUMN image_path TEXT")
-    conn.commit()
-    conn.close()
+# ======================== LIVE STATE ========================
+state_lock = threading.Lock()
+stream_lock = threading.Lock()
 
-def save_detection(confianza, x1, y1, x2, y2, fuente='rtsp', image_path=None):
-    """Guarda detección en BD si confianza > 0.60."""
-    if confianza > YOLO_CONFIG['min_confidence_db']:
-        db_path = 'detections.db'
-        now = datetime.now()
-        fecha = now.strftime('%Y-%m-%d')
-        hora = now.strftime('%H:%M:%S')
-        try:
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO detections (fecha, hora, confianza, fuente, x1, y1, x2, y2, image_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (fecha, hora, float(confianza), fuente, int(x1), int(y1), int(x2), int(y2), image_path))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            print(f"[ERROR] No se pudo guardar detección: {e}")
+camera_source_mode = "fixed"  # fixed | ptz (selección del operador)
 
-# ======================== PROCESAMIENTO DE FRAMES ========================
-def draw_detections(frame, results):
-    """Dibuja bounding boxes, etiquetas y confianza en el frame."""
-    detection_list = []
-    
-    for result in results:
-        if result.boxes is not None:
-            boxes = result.boxes
-            for box in boxes:
-                try:
-                    # Obtener coordenadas y confianza
-                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
-                    conf = float(box.conf[0].cpu().numpy())
-                    cls = int(box.cls[0].cpu().numpy())
-                    
-                    # Dibujar rectángulo (color verde para RPAS Micro)
-                    color = (0, 255, 0)  # Verde en BGR
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                    
-                    # Preparar etiqueta
-                    label = f"RPAS Micro: {conf:.2%}"
-                    
-                    # Fondo para el texto
-                    label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                    cv2.rectangle(frame, (x1, y1 - 25), (x1 + label_size[0], y1), color, -1)
-                    
-                    # Dibujar etiqueta
-                    cv2.putText(frame, label, (x1, y1 - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-                    
-                    # Guardar en lista de detecciones
-                    detection_list.append({
-                        'confidence': conf,
-                        'bbox': (x1, y1, x2, y2)
-                    })
-                    
-                    # Guardar frame si confianza > 0.60
-                    image_path = None
-                    if conf > YOLO_CONFIG['min_confidence_db']:
-                        os.makedirs(STORAGE_CONFIG['detections_frames_folder'], exist_ok=True)
-                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-                        image_filename = f"detection_{timestamp}_{conf:.2f}.jpg"
-                        image_path = os.path.join(STORAGE_CONFIG['detections_frames_folder'], image_filename)
-                        cv2.imwrite(image_path, frame)
-                    
-                    # Guardar en BD
-                    save_detection(conf, x1, y1, x2, y2, 'rtsp', image_path)
-                    
-                except Exception as e:
-                    print(f"[ERROR] Al procesar detección: {e}")
-    
-    return frame, detection_list
+current_detection_state = {
+    "status": "Zona despejada",
+    "avg_confidence": 0.0,
+    "detected": False,
+    "last_update": None,
+    "detection_count": 0,
+    "camera_source_mode": camera_source_mode,
+}
 
-def enviar_comando_ptz(direction: str, speed: float = 0.5):
-    """
-    Simulación de envío de comando PTZ.
-    En integración real, aquí iría ONVIF / SDK del fabricante / HTTP API.
-    """
-    print(f"[PTZ] Comando simulado: direction={direction} speed={speed}")
+latest_annotated_jpeg: bytes | None = None
+latest_annotated_ts: float | None = None
 
 
 def _bbox_off_center(frame_w: int, frame_h: int, bbox_xyxy):
@@ -188,7 +168,6 @@ def _bbox_off_center(frame_w: int, frame_h: int, bbox_xyxy):
     cx = (x1 + x2) / 2.0
     cy = (y1 + y2) / 2.0
 
-    # Zona central tolerada (rectángulo). Fuera de ella => pedir movimiento PTZ.
     tol_w = 0.20 * frame_w
     tol_h = 0.20 * frame_h
     center_x = frame_w / 2.0
@@ -205,56 +184,144 @@ def _bbox_off_center(frame_w: int, frame_h: int, bbox_xyxy):
     return "up" if dy < 0 else "down"
 
 
-class _RTSPLatestFrameReader:
+def _ptz_vector(direction: str):
+    # Mapeo simple. Ajustar según el PTZ real.
+    if direction == "left":
+        return (-0.3, 0.0, 0.0)
+    if direction == "right":
+        return (0.3, 0.0, 0.0)
+    if direction == "up":
+        return (0.0, 0.3, 0.0)
+    if direction == "down":
+        return (0.0, -0.3, 0.0)
+    return (0.0, 0.0, 0.0)
+
+
+class PTZCommandWorker:
     """
-    Lee RTSP en un hilo dedicado y conserva sólo el último frame.
-    Esto "dropea" frames automáticamente si hay lag para mantener tiempo real.
+    Ejecuta comandos PTZ en un hilo separado para evitar congelamientos.
     """
 
-    def __init__(self, url: str):
-        self.url = url
+    def __init__(self):
+        self._q: queue.Queue[str] = queue.Queue(maxsize=50)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._controller: PTZController | None = None
+        self._last_cmd_at = 0.0
+
+    def start(self):
+        if not self._thread.is_alive():
+            self._thread.start()
+
+    def enqueue(self, direction: str):
+        try:
+            self._q.put_nowait(direction)
+        except Exception:
+            pass
+
+    def _get_controller(self) -> PTZController | None:
+        # Los hilos no tienen app context por defecto.
+        with app.app_context():
+            cfg = get_or_create_camera_config()
+            if not cfg.onvif_host or not cfg.onvif_username or not cfg.onvif_password:
+                return None
+            return PTZController(
+                host=cfg.onvif_host,
+                port=int(cfg.onvif_port or 80),
+                username=cfg.onvif_username,
+                password=cfg.onvif_password,
+            )
+
+    def _run(self):
+        while not self._stop.is_set():
+            try:
+                direction = self._q.get(timeout=0.2)
+            except queue.Empty:
+                continue
+
+            # Rate limit (evita saturar PTZ)
+            now = time.time()
+            if now - self._last_cmd_at < 0.25:
+                continue
+            self._last_cmd_at = now
+
+            try:
+                if self._controller is None:
+                    self._controller = self._get_controller()
+                if self._controller is None:
+                    continue
+                x, y, z = _ptz_vector(direction)
+                self._controller.continuous_move(x=x, y=y, zoom=z, duration_s=0.15)
+            except Exception as e:
+                print(f"[PTZ][ERROR] {e}")
+                self._controller = None
+
+
+ptz_worker = PTZCommandWorker()
+ptz_worker.start()
+
+
+class _RTSPLatestFrameReader:
+    """
+    Lee RTSP en un hilo y conserva sólo el último frame (drop de frames si hay lag).
+    """
+
+    def __init__(self):
         self._lock = threading.Lock()
         self._frame = None
         self._ts = None
         self._stop = threading.Event()
-        self._thread = None
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._current_url = None
 
     def start(self):
-        if self._thread and self._thread.is_alive():
-            return
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
-
-    def stop(self):
-        self._stop.set()
-        if self._thread:
-            self._thread.join(timeout=2)
+        if not self._thread.is_alive():
+            self._thread.start()
 
     def get_latest(self):
         with self._lock:
             return self._frame, self._ts
 
+    def _get_rtsp_url(self) -> str | None:
+        # Los hilos no tienen app context por defecto.
+        with app.app_context():
+            cfg = get_or_create_camera_config()
+            url = cfg.effective_rtsp_url()
+            return url or RTSP_CONFIG.get("url")
+
     def _run(self):
         cap = None
         try:
             while not self._stop.is_set():
+                desired_url = self._get_rtsp_url()
+                if desired_url and desired_url != self._current_url:
+                    self._current_url = desired_url
+                    if cap is not None:
+                        try:
+                            cap.release()
+                        except Exception:
+                            pass
+                        cap = None
+
+                if not self._current_url:
+                    time.sleep(0.5)
+                    continue
+
                 if cap is None or not cap.isOpened():
-                    print(f"[INFO] Conectando a RTSP: {self.url}")
-                    cap = cv2.VideoCapture(self.url)
+                    cap = cv2.VideoCapture(self._current_url)
                     if cap.isOpened():
-                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, VIDEO_CONFIG['width'])
-                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, VIDEO_CONFIG['height'])
-                        cap.set(cv2.CAP_PROP_FPS, VIDEO_CONFIG['fps'])
+                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, VIDEO_CONFIG["width"])
+                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, VIDEO_CONFIG["height"])
+                        cap.set(cv2.CAP_PROP_FPS, VIDEO_CONFIG["fps"])
                         cap.set(cv2.CAP_PROP_BUFFERSIZE, RTSP_CONFIG.get("buffer_size", 1))
                     else:
-                        print("[WARNING] No se pudo abrir RTSP. Reintentando...")
+                        print("[RTSP] No se pudo abrir RTSP. Reintentando...")
                         time.sleep(1.0)
                         continue
 
                 ret, frame = cap.read()
                 if not ret or frame is None:
-                    print("[WARNING] Lectura RTSP fallida. Reintentando conexión...")
+                    print("[RTSP] Lectura fallida. Reintentando conexión...")
                     try:
                         cap.release()
                     except Exception:
@@ -276,27 +343,17 @@ class _RTSPLatestFrameReader:
 
 
 class _LiveVideoProcessor:
-    """Procesa el último frame RTSP, ejecuta YOLO en GPU y conserva el último JPEG anotado."""
-
     def __init__(self, reader: _RTSPLatestFrameReader):
         self.reader = reader
+        self._thread = threading.Thread(target=self._run, daemon=True)
         self._stop = threading.Event()
-        self._thread = None
         self._last_ts = None
         self._frame_count = 0
-        self._detection_times = deque(maxlen=30)
+        self._detection_times = []
 
     def start(self):
-        if self._thread and self._thread.is_alive():
-            return
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
-
-    def stop(self):
-        self._stop.set()
-        if self._thread:
-            self._thread.join(timeout=2)
+        if not self._thread.is_alive():
+            self._thread.start()
 
     def _run(self):
         global latest_annotated_jpeg, latest_annotated_ts
@@ -312,7 +369,7 @@ class _LiveVideoProcessor:
             self._last_ts = ts
 
             try:
-                frame = cv2.resize(frame, (VIDEO_CONFIG['width'], VIDEO_CONFIG['height']))
+                frame = cv2.resize(frame, (VIDEO_CONFIG["width"], VIDEO_CONFIG["height"]))
             except Exception:
                 pass
 
@@ -324,17 +381,19 @@ class _LiveVideoProcessor:
                     t0 = time.time()
                     results = yolo_model(
                         frame,
-                        device=YOLO_CONFIG['device'],
-                        conf=YOLO_CONFIG['confidence'],
-                        verbose=YOLO_CONFIG['verbose'],
+                        device=YOLO_CONFIG["device"],
+                        conf=YOLO_CONFIG["confidence"],
+                        verbose=YOLO_CONFIG["verbose"],
                     )
-                    self._detection_times.append(time.time() - t0)
+                    dt = time.time() - t0
+                    self._detection_times.append(dt)
+                    self._detection_times = self._detection_times[-30:]
                     frame, detection_list = draw_detections(frame, results)
                 except Exception as e:
-                    print(f"[ERROR] En inferencia YOLO: {e}")
+                    print(f"[YOLO][ERROR] {e}")
                     cv2.putText(frame, "Error en inferencia", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-            # Regla de adaptabilidad: PTZ si el bbox no está centrado.
+            # Regla adaptativa: si PTZ y bbox fuera del centro -> encolar comando en hilo PTZ
             with state_lock:
                 mode = camera_source_mode
             if mode == "ptz" and detection_list:
@@ -342,8 +401,9 @@ class _LiveVideoProcessor:
                 h, w = frame.shape[:2]
                 direction = _bbox_off_center(w, h, best["bbox"])
                 if direction:
-                    enviar_comando_ptz(direction=direction, speed=0.6)
+                    ptz_worker.enqueue(direction)
 
+            # Estado UI
             with state_lock:
                 current_detection_state["camera_source_mode"] = camera_source_mode
                 current_detection_state["last_update"] = datetime.now().isoformat()
@@ -359,37 +419,55 @@ class _LiveVideoProcessor:
                     current_detection_state["detected"] = False
                     current_detection_state["detection_count"] = 0
 
+            # FPS estimado inferencia
             if self._detection_times:
-                avg_inf_time = float(np.mean(list(self._detection_times)))
-                fps = 1.0 / avg_inf_time if avg_inf_time > 0 else 0.0
+                avg = float(np.mean(self._detection_times))
+                fps = (1.0 / avg) if avg > 0 else 0.0
                 cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-            ok, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, VIDEO_CONFIG['jpeg_quality']])
-            if not ok:
-                time.sleep(0.01)
-                continue
+            ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, VIDEO_CONFIG["jpeg_quality"]])
+            if ok:
+                with stream_lock:
+                    latest_annotated_jpeg = buf.tobytes()
+                    latest_annotated_ts = ts
 
-            with stream_lock:
-                latest_annotated_jpeg = buffer.tobytes()
-                latest_annotated_ts = ts
+
+_rtsp_reader = _RTSPLatestFrameReader()
+_live_processor = _LiveVideoProcessor(_rtsp_reader)
+_live_threads_started = False
 
 
 def _ensure_live_threads_started():
-    global _rtsp_reader, _live_processor, _live_threads_started
+    global _live_threads_started
     if _live_threads_started:
         return
-    _rtsp_reader = _RTSPLatestFrameReader(rtsp_url)
-    _live_processor = _LiveVideoProcessor(_rtsp_reader)
     _rtsp_reader.start()
     _live_processor.start()
     _live_threads_started = True
 
 
+def draw_detections(frame, results):
+    detection_list = []
+    for result in results:
+        if result.boxes is None:
+            continue
+        for box in result.boxes:
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+            conf = float(box.conf[0].cpu().numpy())
+            color = (0, 255, 0)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            label = f"RPAS Micro {conf:.0%}"
+            label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            cv2.rectangle(frame, (x1, max(0, y1 - 25)), (x1 + label_size[0], y1), color, -1)
+            cv2.putText(frame, label, (x1, max(15, y1 - 7)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+            detection_list.append({"confidence": conf, "bbox": (x1, y1, x2, y2)})
+    return frame, detection_list
+
+
 def process_rtsp_stream():
-    """Generador multipart/x-mixed-replace: entrega el último frame anotado (tiempo real con drop de frames)."""
     _ensure_live_threads_started()
 
-    placeholder = np.zeros((VIDEO_CONFIG['height'], VIDEO_CONFIG['width'], 3), dtype=np.uint8)
+    placeholder = np.zeros((VIDEO_CONFIG["height"], VIDEO_CONFIG["width"], 3), dtype=np.uint8)
     cv2.putText(placeholder, "Conectando a RTSP...", (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
     _, ph_buf = cv2.imencode(".jpg", placeholder, [cv2.IMWRITE_JPEG_QUALITY, 80])
     ph_bytes = ph_buf.tobytes()
@@ -413,41 +491,99 @@ def process_rtsp_stream():
         yield (
             b"--frame\r\n"
             b"Content-Type: image/jpeg\r\n"
-            b"Content-Length: "
-            + str(len(frame_bytes)).encode()
-            + b"\r\n\r\n"
-            + frame_bytes
-            + b"\r\n"
+            b"Content-Length: " + str(len(frame_bytes)).encode() + b"\r\n\r\n" + frame_bytes + b"\r\n"
         )
 
-def allowed_file(filename):
-    """Verifica que el archivo tenga extensión permitida."""
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
-# ======================== RUTAS FLASK ========================
+# ======================== AUTH ========================
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for("index"))
 
-@app.route('/')
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+        user = User.query.filter_by(username=username).first()
+        if user and user.check_password(password):
+            login_user(user)
+            return redirect(url_for("index"))
+        flash("Credenciales inválidas.", "danger")
+
+    return render_template("login.html")
+
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for("login"))
+
+
+# ======================== UI ========================
+@app.route("/")
+@login_required
 def index():
-    """Ruta principal - carga la interfaz HTML."""
-    return render_template('index.html')
+    cfg = get_or_create_camera_config()
+    return render_template("index.html", is_admin=(current_user.role == "admin"), camera_type=cfg.camera_type)
 
-@app.route('/video_feed')
+
+@app.route("/admin/camera", methods=["GET", "POST"])
+@login_required
+@role_required("admin")
+def admin_camera():
+    cfg = get_or_create_camera_config()
+
+    if request.method == "POST":
+        cfg.camera_type = (request.form.get("camera_type") or "fixed").lower()
+
+        cfg.rtsp_url = (request.form.get("rtsp_url") or "").strip() or None
+        cfg.rtsp_username = (request.form.get("rtsp_username") or "").strip() or None
+        cfg.rtsp_password = (request.form.get("rtsp_password") or "").strip() or None
+
+        cfg.onvif_host = (request.form.get("onvif_host") or "").strip() or None
+        cfg.onvif_port = int(request.form.get("onvif_port") or 80)
+        cfg.onvif_username = (request.form.get("onvif_username") or "").strip() or None
+        cfg.onvif_password = (request.form.get("onvif_password") or "").strip() or None
+
+        db.session.commit()
+        flash("Configuración de cámara guardada.", "success")
+        return redirect(url_for("admin_camera"))
+
+    return render_template("admin_camera.html", cfg=cfg)
+
+
+@app.route("/admin/camera/test", methods=["POST"])
+@login_required
+@role_required("admin")
+def admin_camera_test():
+    cfg = get_or_create_camera_config()
+    if not cfg.onvif_host or not cfg.onvif_username or not cfg.onvif_password:
+        return jsonify({"ok": False, "error": "Completa host/usuario/contraseña ONVIF."}), 400
+    try:
+        controller = PTZController(cfg.onvif_host, int(cfg.onvif_port or 80), cfg.onvif_username, cfg.onvif_password)
+        return jsonify(controller.test_connection())
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ======================== STREAM + STATUS ========================
+@app.route("/video_feed")
+@login_required
 def video_feed():
-    """Ruta para streaming de video RTSP con detecciones en tiempo real."""
+    # Permite override por URL si el operador cambia el modo sin recargar la app.
     source = (request.args.get("source") or "").strip().lower()
     if source in {"fixed", "ptz"}:
         global camera_source_mode
         with state_lock:
             camera_source_mode = source
             current_detection_state["camera_source_mode"] = camera_source_mode
-    return Response(
-        process_rtsp_stream(),
-        mimetype='multipart/x-mixed-replace; boundary=frame'
-    )
+    return Response(process_rtsp_stream(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
-@app.route('/set_camera_source', methods=['POST'])
+
+@app.route("/set_camera_source", methods=["POST"])
+@login_required
 def set_camera_source():
-    """Endpoint para cambiar el origen/mode de cámara (Fija vs PTZ) desde la UI."""
     payload = request.get_json(silent=True) or request.form or {}
     source = str(payload.get("source", "")).strip().lower()
     if source not in {"fixed", "ptz"}:
@@ -457,237 +593,151 @@ def set_camera_source():
     with state_lock:
         camera_source_mode = source
         current_detection_state["camera_source_mode"] = camera_source_mode
-
     return jsonify({"success": True, "camera_source_mode": camera_source_mode})
 
-@app.route('/detection_status')
+
+@app.route("/detection_status")
+@login_required
 def detection_status():
-    """Endpoint AJAX para obtener estado actual de detecciones."""
     with state_lock:
         return jsonify(dict(current_detection_state))
 
-@app.route('/uploads/<path:filename>')
-def uploaded_file(filename):
-    """Sirve archivos procesados guardados en la carpeta uploads."""
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
-@app.route('/upload_detect', methods=['POST'])
+# ======================== UPLOAD DETECT (persist results) ========================
+@app.route("/upload_detect", methods=["POST"])
+@login_required
 def upload_detect():
-    """
-    Ruta para procesar archivos subidos (imagen o video).
-    - Recibe archivo, aplica YOLO, devuelve resultado procesado.
-    """
-    try:
-        # Validar que se subió un archivo
-        if 'file' not in request.files:
-            return jsonify({'error': 'No se subió archivo'}), 400
-        
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({'error': 'Archivo sin nombre'}), 400
-        
-        if not allowed_file(file.filename):
-            return jsonify({'error': 'Extensión no permitida'}), 400
-        
-        # Guardar archivo temporalmente
-        filename = secure_filename(file.filename)
-        timestamp = str(int(time.time()))
-        filename = f"{timestamp}_{filename}"
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        
-        # Determinar si es imagen o video
-        file_ext = filename.rsplit('.', 1)[1].lower()
-        
-        if file_ext in {'jpg', 'jpeg', 'png'}:
-            # Procesar imagen
-            return process_image_detection(filepath)
-        elif file_ext in {'mp4', 'avi', 'mov'}:
-            # Procesar video
-            return process_video_detection(filepath)
-        else:
-            os.remove(filepath)
-            return jsonify({'error': 'Tipo de archivo no soportado'}), 400
-    
-    except Exception as e:
-        print(f"[ERROR] En upload_detect: {e}")
-        return jsonify({'error': str(e)}), 500
+    if "file" not in request.files:
+        return jsonify({"success": False, "error": "No se subió archivo"}), 400
+    f = request.files["file"]
+    if not f or not f.filename:
+        return jsonify({"success": False, "error": "Archivo sin nombre"}), 400
+    if not allowed_file(f.filename):
+        return jsonify({"success": False, "error": "Extensión no permitida"}), 400
+    if yolo_model is None:
+        return jsonify({"success": False, "error": "Modelo YOLO no disponible"}), 500
 
-def process_image_detection(filepath):
-    """Procesa una imagen: YOLO → dibuja detecciones → devuelve imagen procesada."""
-    try:
-        # Leer imagen
-        image = cv2.imread(filepath)
-        if image is None:
-            return jsonify({'error': 'No se pudo leer la imagen'}), 400
-        
-        original_height, original_width = image.shape[:2]
-        
-        # Redimensionar para inferencia (max 1280x720)
-        if original_width > 1280 or original_height > 720:
-            scale = min(1280 / original_width, 720 / original_height)
-            new_width = int(original_width * scale)
-            new_height = int(original_height * scale)
-            image = cv2.resize(image, (new_width, new_height))
-        
-        # Inferencia YOLO
-        if yolo_model is None:
-            return jsonify({'error': 'Modelo YOLO no disponible'}), 500
-        
-        results = yolo_model(
-            image,
-            device=YOLO_CONFIG['device'],
-            conf=YOLO_CONFIG['confidence'],
-            verbose=YOLO_CONFIG['verbose'],
-        )
-        
-        # Procesar detecciones
-        image, detection_list = draw_detections(image, results)
-        
-        # Codificar imagen procesada a base64
-        ret, buffer = cv2.imencode('.jpg', image)
-        img_base64 = buffer.tobytes()
-        import base64
-        img_b64_str = base64.b64encode(img_base64).decode()
-        
-        # Limpiar archivo temporal
-        os.remove(filepath)
-        
-        return jsonify({
-            'success': True,
-            'image': f'data:image/jpeg;base64,{img_b64_str}',
-            'detections_count': len(detection_list),
-            'avg_confidence': np.mean([d['confidence'] for d in detection_list]) if detection_list else 0.0
-        })
-    
-    except Exception as e:
-        print(f"[ERROR] En process_image_detection: {e}")
-        if os.path.exists(filepath):
-            os.remove(filepath)
-        return jsonify({'error': str(e)}), 500
+    filename = secure_filename(f.filename)
+    ts = int(time.time())
+    temp_name = f"{ts}_{filename}"
+    temp_path = os.path.join(app.config["UPLOAD_FOLDER"], temp_name)
+    f.save(temp_path)
 
-def process_video_detection(filepath):
-    """Procesa un video: YOLO en cada frame → crea video procesado → devuelve URL de descarga."""
+    ext = filename.rsplit(".", 1)[1].lower()
     try:
-        # Abrir video
-        cap = cv2.VideoCapture(filepath)
-        if not cap.isOpened():
-            return jsonify({'error': 'No se pudo leer el video'}), 400
-        
-        # Obtener propiedades
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        if not fps or fps <= 0:
-            fps = VIDEO_CONFIG['fps']
-        
-        # Redimensionar si es muy grande
-        if width > 1280 or height > 720:
-            scale = min(1280 / width, 720 / height)
-            width = int(width * scale)
-            height = int(height * scale)
-        
-        # Crear writer para video procesado
-        output_filename = f"processed_{int(time.time())}.mp4"
-        output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-        
-        frame_count = 0
-        total_detections = 0
-        total_confidence = 0.0
-        
-        if yolo_model is None:
-            return jsonify({'error': 'Modelo YOLO no disponible'}), 500
-        
+        if ext in {"jpg", "jpeg", "png"}:
+            return _process_image_and_persist(temp_path)
+        if ext in {"mp4", "avi", "mov"}:
+            return _process_video_and_persist(temp_path)
+        return jsonify({"success": False, "error": "Tipo de archivo no soportado"}), 400
+    finally:
+        # limpiar temporal si quedó
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
+
+def _process_image_and_persist(path: str):
+    image = cv2.imread(path)
+    if image is None:
+        return jsonify({"success": False, "error": "No se pudo leer la imagen"}), 400
+
+    h, w = image.shape[:2]
+    if w > 1280 or h > 720:
+        scale = min(1280 / w, 720 / h)
+        image = cv2.resize(image, (int(w * scale), int(h * scale)))
+
+    results = yolo_model(image, device=YOLO_CONFIG["device"], conf=YOLO_CONFIG["confidence"], verbose=YOLO_CONFIG["verbose"])
+    image, detection_list = draw_detections(image, results)
+
+    out_name = f"result_{int(time.time())}.jpg"
+    out_path = os.path.join(app.config["RESULTS_FOLDER"], out_name)
+    cv2.imwrite(out_path, image)
+
+    avg_conf = float(np.mean([d["confidence"] for d in detection_list])) if detection_list else 0.0
+    return jsonify(
+        {
+            "success": True,
+            "result_type": "image",
+            "result_url": f"/static/results/{out_name}",
+            "detections_count": len(detection_list),
+            "avg_confidence": avg_conf,
+        }
+    )
+
+
+def _process_video_and_persist(path: str):
+    cap = cv2.VideoCapture(path)
+    if not cap.isOpened():
+        return jsonify({"success": False, "error": "No se pudo leer el video"}), 400
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or VIDEO_CONFIG["fps"]
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or VIDEO_CONFIG["width"]
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or VIDEO_CONFIG["height"]
+
+    if width > 1280 or height > 720:
+        scale = min(1280 / width, 720 / height)
+        width = int(width * scale)
+        height = int(height * scale)
+
+    out_name = f"result_{int(time.time())}.mp4"
+    out_path = os.path.join(app.config["RESULTS_FOLDER"], out_name)
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    out = cv2.VideoWriter(out_path, fourcc, float(fps), (width, height))
+
+    frame_count = 0
+    total_detections = 0
+    total_conf = 0.0
+
+    try:
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
-            
-            # Redimensionar
+
             if frame.shape[1] != width or frame.shape[0] != height:
                 frame = cv2.resize(frame, (width, height))
-            
-            # Inferencia
-            results = yolo_model(
-                frame,
-                device=YOLO_CONFIG['device'],
-                conf=YOLO_CONFIG['confidence'],
-                verbose=YOLO_CONFIG['verbose'],
-            )
-            
-            # Procesar detecciones
+
+            results = yolo_model(frame, device=YOLO_CONFIG["device"], conf=YOLO_CONFIG["confidence"], verbose=YOLO_CONFIG["verbose"])
             frame, detection_list = draw_detections(frame, results)
-            
-            # Acumular estadísticas
+
             total_detections += len(detection_list)
             if detection_list:
-                total_confidence += np.mean([d['confidence'] for d in detection_list])
-            
-            # Escribir frame procesado
+                total_conf += float(np.mean([d["confidence"] for d in detection_list]))
+
             out.write(frame)
             frame_count += 1
-        
+    finally:
         cap.release()
         out.release()
-        
-        avg_conf = (total_confidence / max(1, frame_count))
-        
-        # Limpiar original
-        os.remove(filepath)
-        
-        return jsonify({
-            'success': True,
-            'video_url': f'/uploads/{output_filename}',
-            'frames_processed': frame_count,
-            'total_detections': total_detections,
-            'avg_confidence': avg_conf
-        })
-    
-    except Exception as e:
-        print(f"[ERROR] En process_video_detection: {e}")
-        if os.path.exists(filepath):
-            os.remove(filepath)
-        return jsonify({'error': str(e)}), 500
 
-@app.route('/history')
-def history():
-    """Endpoint para obtener historial de detecciones."""
-    try:
-        db_path = 'detections.db'
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM detections ORDER BY id DESC LIMIT 100')
-        rows = cursor.fetchall()
-        conn.close()
-        
-        detections = [dict(row) for row in rows]
-        return jsonify(detections)
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    avg_conf = (total_conf / max(1, frame_count)) if frame_count else 0.0
+    return jsonify(
+        {
+            "success": True,
+            "result_type": "video",
+            "result_url": f"/static/results/{out_name}",
+            "frames_processed": frame_count,
+            "total_detections": total_detections,
+            "avg_confidence": float(avg_conf),
+        }
+    )
 
-# Inicializar BD tambien cuando el modulo se importe con flask run/uWSGI.
-init_db()
 
-# ======================== INICIALIZACIÓN ========================
-if __name__ == '__main__':
-    # Mensajes informativos
-    print("\n" + "="*60)
-    print("🚁 SERVIDOR DE DETECCIÓN DE DRONES RPAS MICRO")
-    print("="*60)
-    print(f"[INFO] Modelo YOLO: {'CARGADO EN GPU' if yolo_model else 'NO DISPONIBLE'}")
-    print(f"[INFO] URL RTSP: {rtsp_url}")
-    print(f"[INFO] Servidor Flask iniciado en: http://localhost:5000")
-    print("[INFO] Interfaz disponible en: http://localhost:5000/")
-    print("="*60 + "\n")
-    
-    # Iniciar servidor Flask
+# ======================== INIT ========================
+with app.app_context():
+    db.create_all()
+    get_or_create_camera_config()
+    bootstrap_users()
+
+
+if __name__ == "__main__":
+    print(f"[INFO] Servidor: http://localhost:{FLASK_CONFIG['port']}")
     app.run(
-        debug=FLASK_CONFIG['debug'],
-        host=FLASK_CONFIG['host'],
-        port=FLASK_CONFIG['port'],
-        threaded=FLASK_CONFIG['threaded'],
+        debug=FLASK_CONFIG["debug"],
+        host=FLASK_CONFIG["host"],
+        port=FLASK_CONFIG["port"],
+        threaded=True,
     )
