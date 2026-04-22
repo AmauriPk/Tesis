@@ -10,6 +10,7 @@ import time
 from datetime import datetime
 from functools import wraps
 import json
+from urllib.parse import urlparse
 
 import cv2
 import numpy as np
@@ -22,6 +23,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    session,
     url_for,
 )
 from flask_login import (
@@ -55,6 +57,18 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///app.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+app.config["SESSION_PERMANENT"] = False
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = os.environ.get("SESSION_COOKIE_SAMESITE", "Strict")
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "").strip().lower() in {
+    "1",
+    "true",
+    "t",
+    "yes",
+    "y",
+    "on",
+}
+
 if FLASK_CONFIG.get("debug"):
     # En desarrollo: recargar templates y evitar caché agresiva de estáticos.
     app.config["TEMPLATES_AUTO_RELOAD"] = True
@@ -74,6 +88,12 @@ db.init_app(app)
 login_manager = LoginManager()
 login_manager.login_view = "login"
 login_manager.init_app(app)
+
+
+@app.before_request
+def _volatile_sessions():
+    # Sesiones volátiles: no persistir token si el navegador se cierra.
+    session.permanent = False
 
 
 @login_manager.user_loader
@@ -164,7 +184,7 @@ yolo_model = load_yolo_model()
 state_lock = threading.Lock()
 stream_lock = threading.Lock()
 
-camera_source_mode = "fixed"  # fixed | ptz (por DB; override admin permitido)
+camera_source_mode = "fixed"  # fixed | ptz (controlado por DB; admin lo define en /admin/camera)
 
 current_detection_state = {
     "status": "Zona despejada",
@@ -527,10 +547,17 @@ def login():
         user = User.query.filter_by(username=username).first()
         if user and user.check_password(password):
             login_user(user)
-            return redirect(url_for("index"))
+            session.permanent = False
+            next_url = (request.form.get("next") or request.args.get("next") or "").strip()
+            if next_url:
+                parsed = urlparse(next_url)
+                is_safe = (parsed.scheme == "") and (parsed.netloc == "")
+                if is_safe and next_url not in {"/", "/?tab=live"}:
+                    return redirect(next_url)
+            return redirect(url_for("index", tab="live"))
         flash("Credenciales inválidas.", "danger")
 
-    return render_template("login.html")
+    return render_template("login.html", show_bootstrap_hint=bool(FLASK_CONFIG.get("debug")))
 
 
 @app.route("/logout")
@@ -564,11 +591,15 @@ def diag():
 @login_required
 def index():
     cfg = get_or_create_camera_config()
+    active_tab = (request.args.get("tab") or "").strip().lower() or "live"
+    if active_tab not in {"live", "manual"}:
+        active_tab = "live"
     return render_template(
         "index.html",
         is_admin=(current_user.role == "admin"),
         camera_type=cfg.camera_type,
         current_user=current_user,
+        active_tab=active_tab,
     )
 
 
@@ -619,32 +650,7 @@ def admin_camera_test():
 @app.route("/video_feed")
 @login_required
 def video_feed():
-    # Override sólo para Administrador (Operador no puede cambiar tipo de cámara).
-    if current_user.role == "admin":
-        source = (request.args.get("source") or "").strip().lower()
-        if source in {"fixed", "ptz"}:
-            global camera_source_mode
-            with state_lock:
-                camera_source_mode = source
-                current_detection_state["camera_source_mode"] = camera_source_mode
     return Response(process_rtsp_stream(), mimetype="multipart/x-mixed-replace; boundary=frame")
-
-
-@app.route("/set_camera_source", methods=["POST"])
-@login_required
-def set_camera_source():
-    if current_user.role != "admin":
-        return jsonify({"success": False, "error": "Acceso denegado."}), 403
-    payload = request.get_json(silent=True) or request.form or {}
-    source = str(payload.get("source", "")).strip().lower()
-    if source not in {"fixed", "ptz"}:
-        return jsonify({"success": False, "error": "Modo inválido. Usa 'fixed' o 'ptz'."}), 400
-
-    global camera_source_mode
-    with state_lock:
-        camera_source_mode = source
-        current_detection_state["camera_source_mode"] = camera_source_mode
-    return jsonify({"success": True, "camera_source_mode": camera_source_mode})
 
 
 @app.route("/detection_status")

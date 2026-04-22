@@ -66,22 +66,22 @@
     <div class="container-fluid py-3">
         <ul class="nav nav-tabs" role="tablist">
             <li class="nav-item" role="presentation">
-                <button class="nav-link active" id="manual-tab" data-bs-toggle="tab" data-bs-target="#manual"
-                        type="button" role="tab" aria-controls="manual" aria-selected="true">
+                <button class="nav-link {% if active_tab == 'manual' %}active{% endif %}" id="manual-tab" data-bs-toggle="tab" data-bs-target="#manual"
+                        type="button" role="tab" aria-controls="manual" aria-selected="{{ 'true' if active_tab == 'manual' else 'false' }}">
                     <i class="fa-solid fa-upload me-1"></i> Detección Manual
                 </button>
             </li>
             <li class="nav-item" role="presentation">
-                <button class="nav-link" id="live-tab" data-bs-toggle="tab" data-bs-target="#live"
-                        type="button" role="tab" aria-controls="live" aria-selected="false">
-                    <i class="fa-solid fa-video me-1"></i> Msdfsdfnitoreo en Vivo
+                <button class="nav-link {% if active_tab == 'live' %}active{% endif %}" id="live-tab" data-bs-toggle="tab" data-bs-target="#live"
+                        type="button" role="tab" aria-controls="live" aria-selected="{{ 'true' if active_tab == 'live' else 'false' }}">
+                    <i class="fa-solid fa-video me-1"></i> Monitoreo en Vivo
                 </button>
             </li>
         </ul>
 
         <div class="tab-content">
             <!-- ================= MANUAL ================= -->
-            <div class="tab-pane fade show active" id="manual" role="tabpanel" aria-labelledby="manual-tab">
+            <div class="tab-pane fade {% if active_tab == 'manual' %}show active{% endif %}" id="manual" role="tabpanel" aria-labelledby="manual-tab">
                 <div class="row g-3">
                     <div class="col-xl-4">
                         <div class="card">
@@ -174,36 +174,10 @@
             </div>
 
             <!-- ================= LIVE ================= -->
-            <div class="tab-pane fade" id="live" role="tabpanel" aria-labelledby="live-tab">
+            <div class="tab-pane fade {% if active_tab == 'live' %}show active{% endif %}" id="live" role="tabpanel" aria-labelledby="live-tab">
                 <div class="row g-3">
                     <div class="col-xl-8">
-                        {% if current_user.role == 'admin' %}
-                            <div class="card">
-                                <div class="card-header">
-                                    <i class="fa-solid fa-microchip me-1"></i> Hardware: Origen de video
-                                </div>
-                                <div class="card-body d-flex flex-wrap align-items-center gap-3">
-                                    <div class="btn-group" role="group" aria-label="Origen video">
-                                        <input type="radio" class="btn-check" name="cameraSource" id="src-fixed" autocomplete="off"
-                                               {% if camera_type != 'ptz' %}checked{% endif %} />
-                                        <label class="btn btn-outline-success" for="src-fixed">
-                                            <i class="fa-solid fa-video me-1"></i> Fija
-                                        </label>
-
-                                        <input type="radio" class="btn-check" name="cameraSource" id="src-ptz" autocomplete="off"
-                                               {% if camera_type == 'ptz' %}checked{% endif %} />
-                                        <label class="btn btn-outline-warning" for="src-ptz">
-                                            <i class="fa-solid fa-crosshairs me-1"></i> PTZ
-                                        </label>
-                                    </div>
-                                    <span class="text-secondary small">
-                                        En PTZ: comandos ONVIF se ejecutan en un hilo separado (sin congelar el stream).
-                                    </span>
-                                </div>
-                            </div>
-                        {% endif %}
-
-                        <div class="card mt-3">
+                        <div class="card">
                             <div class="card-header">
                                 <i class="fa-solid fa-eye me-1"></i> Live Feed (RTSP)
                             </div>
@@ -255,8 +229,6 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         const ALERT_UPDATE_INTERVAL = 1000;
-        const IS_ADMIN = {{ 'true' if current_user.role == 'admin' else 'false' }};
-        let cameraSourceMode = '{{ camera_type }}' === 'ptz' ? 'ptz' : 'fixed';
         let progressTimer = null;
         let activeJobId = null;
 
@@ -333,19 +305,6 @@
             activeJobId = null;
         }
 
-        function applyCameraSourceMode(mode) {
-            cameraSourceMode = mode;
-            const img = document.getElementById('liveImg');
-            if (img) img.src = `/video_feed?source=${encodeURIComponent(mode)}&_=${Date.now()}`;
-            if (IS_ADMIN) {
-                fetch('/set_camera_source', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ source: mode })
-                }).catch(() => {});
-            }
-        }
-
         async function refreshStatus() {
             try {
                 const r = await fetch('/detection_status');
@@ -366,17 +325,9 @@
             document.getElementById('btnUpload').addEventListener('click', uploadDetect);
             document.getElementById('btnReset').addEventListener('click', resetManual);
 
-            if (IS_ADMIN) {
-                const fixed = document.getElementById('src-fixed');
-                const ptz = document.getElementById('src-ptz');
-                fixed.addEventListener('change', () => fixed.checked && applyCameraSourceMode('fixed'));
-                ptz.addEventListener('change', () => ptz.checked && applyCameraSourceMode('ptz'));
-                applyCameraSourceMode(cameraSourceMode);
-            } else {
-                // Operador: sin override; solo cache-bust del feed.
-                const img = document.getElementById('liveImg');
-                if (img) img.src = `/video_feed?_=${Date.now()}`;
-            }
+            // Cache-bust del feed en carga inicial.
+            const img = document.getElementById('liveImg');
+            if (img) img.src = `/video_feed?_=${Date.now()}`;
 
             document.getElementById('btnRefresh').addEventListener('click', refreshStatus);
             setInterval(refreshStatus, ALERT_UPDATE_INTERVAL);

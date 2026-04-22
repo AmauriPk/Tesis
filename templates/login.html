@@ -24,24 +24,27 @@
                     {% endif %}
                 {% endwith %}
 
-                <form method="post" action="{{ url_for('login') }}">
+                <form method="post" action="{{ url_for('login') }}" autocomplete="off">
+                    <input type="hidden" name="next" value="{{ request.args.get('next', '') }}" />
                     <div class="mb-3">
                         <label class="form-label">Usuario</label>
-                        <input class="form-control" name="username" autocomplete="username" required />
+                        <input class="form-control" name="username" autocomplete="off" autocapitalize="none" spellcheck="false" required />
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Contraseña</label>
-                        <input class="form-control" name="password" type="password" autocomplete="current-password" required />
+                        <input class="form-control" name="password" type="password" autocomplete="off" required />
                     </div>
                     <button class="btn btn-success w-100" type="submit">Ingresar</button>
                 </form>
 
-                <hr class="border-secondary my-4" />
-                <div class="small text-secondary">
-                    Siasdasdasd priasdasdasdmera ejecución, usuarios por defecto:
-                    <div><code>admin / admin123</code> (admin)</div>
-                    <div><code>operador / operador123</code> (operator)</div>
-                </div>
+                {% if show_bootstrap_hint %}
+                    <hr class="border-secondary my-4" />
+                    <div class="small text-secondary">
+                        Primera ejecución (dev): usuarios por defecto
+                        <div><code>admin / admin123</code> (admin)</div>
+                        <div><code>operador / operador123</code> (operator)</div>
+                    </div>
+                {% endif %}
             </div>
         </div>
     </div>
