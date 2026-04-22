@@ -6,3 +6,4 @@ Flask-Login>=0.6.3
 Flask-SQLAlchemy>=3.1.1
 SQLAlchemy>=2.0.0
 onvif-zeep>=0.2.12
+tqdm>=4.66.0

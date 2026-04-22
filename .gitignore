@@ -8,6 +8,8 @@ ENV/
 # Dataset (puede ser grande)
 dataset/
 detections_frames/
+static/
+static/results/
 # Modelos entrenados
 runs/
 *.pt

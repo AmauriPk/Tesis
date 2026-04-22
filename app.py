@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import os
 import queue
+import secrets
+import shutil
+import subprocess
 import threading
 import time
 from datetime import datetime
 from functools import wraps
+import json
 
 import cv2
 import numpy as np
@@ -148,7 +152,7 @@ yolo_model = load_yolo_model()
 state_lock = threading.Lock()
 stream_lock = threading.Lock()
 
-camera_source_mode = "fixed"  # fixed | ptz (selección del operador)
+camera_source_mode = "fixed"  # fixed | ptz (por DB; override admin permitido)
 
 current_detection_state = {
     "status": "Zona despejada",
@@ -161,6 +165,10 @@ current_detection_state = {
 
 latest_annotated_jpeg: bytes | None = None
 latest_annotated_ts: float | None = None
+
+job_lock = threading.Lock()
+progress_by_job: dict[str, dict] = {}
+result_by_job: dict[str, dict] = {}
 
 
 def _bbox_off_center(frame_w: int, frame_h: int, bbox_xyxy):
@@ -547,6 +555,10 @@ def admin_camera():
         cfg.onvif_password = (request.form.get("onvif_password") or "").strip() or None
 
         db.session.commit()
+        with state_lock:
+            global camera_source_mode
+            camera_source_mode = "ptz" if (cfg.camera_type == "ptz") else "fixed"
+            current_detection_state["camera_source_mode"] = camera_source_mode
         flash("Configuración de cámara guardada.", "success")
         return redirect(url_for("admin_camera"))
 
@@ -571,19 +583,22 @@ def admin_camera_test():
 @app.route("/video_feed")
 @login_required
 def video_feed():
-    # Permite override por URL si el operador cambia el modo sin recargar la app.
-    source = (request.args.get("source") or "").strip().lower()
-    if source in {"fixed", "ptz"}:
-        global camera_source_mode
-        with state_lock:
-            camera_source_mode = source
-            current_detection_state["camera_source_mode"] = camera_source_mode
+    # Override sólo para Administrador (Operador no puede cambiar tipo de cámara).
+    if current_user.role == "admin":
+        source = (request.args.get("source") or "").strip().lower()
+        if source in {"fixed", "ptz"}:
+            global camera_source_mode
+            with state_lock:
+                camera_source_mode = source
+                current_detection_state["camera_source_mode"] = camera_source_mode
     return Response(process_rtsp_stream(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
 @app.route("/set_camera_source", methods=["POST"])
 @login_required
 def set_camera_source():
+    if current_user.role != "admin":
+        return jsonify({"success": False, "error": "Acceso denegado."}), 403
     payload = request.get_json(silent=True) or request.form or {}
     source = str(payload.get("source", "")).strip().lower()
     if source not in {"fixed", "ptz"}:
@@ -603,6 +618,50 @@ def detection_status():
         return jsonify(dict(current_detection_state))
 
 
+@app.route("/progress/<job_id>")
+@login_required
+def progress(job_id: str):
+    with job_lock:
+        p = progress_by_job.get(job_id)
+        r = result_by_job.get(job_id)
+    if not p:
+        return jsonify({"success": False, "error": "Job no encontrado"}), 404
+    payload = dict(p)
+    if r:
+        payload.update(r)
+    return jsonify(payload)
+
+
+@app.route("/progress_stream/<job_id>")
+@login_required
+def progress_stream(job_id: str):
+    def gen():
+        last = None
+        while True:
+            with job_lock:
+                p = progress_by_job.get(job_id)
+                r = result_by_job.get(job_id)
+            if not p:
+                yield f"data: {json.dumps({'success': False, 'error': 'Job no encontrado'})}\n\n"
+                break
+            payload = dict(p)
+            if r:
+                payload.update(r)
+            msg = json.dumps(payload)
+            if msg != last:
+                yield f"data: {msg}\n\n"
+                last = msg
+            if p.get("done"):
+                break
+            time.sleep(0.25)
+
+    return Response(
+        gen(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # ======================== UPLOAD DETECT (persist results) ========================
 @app.route("/upload_detect", methods=["POST"])
 @login_required
@@ -619,19 +678,52 @@ def upload_detect():
 
     filename = secure_filename(f.filename)
     ts = int(time.time())
-    temp_name = f"{ts}_{filename}"
+    job_id = secrets.token_urlsafe(10)
+    temp_name = f"{ts}_{job_id}_{filename}"
     temp_path = os.path.join(app.config["UPLOAD_FOLDER"], temp_name)
     f.save(temp_path)
 
     ext = filename.rsplit(".", 1)[1].lower()
     try:
-        if ext in {"jpg", "jpeg", "png"}:
-            return _process_image_and_persist(temp_path)
-        if ext in {"mp4", "avi", "mov"}:
-            return _process_video_and_persist(temp_path)
-        return jsonify({"success": False, "error": "Tipo de archivo no soportado"}), 400
+        with job_lock:
+            progress_by_job[job_id] = {"success": True, "job_id": job_id, "progress": 0, "status": "queued", "done": False}
+        threading.Thread(target=_run_detection_job, args=(job_id, temp_path, ext), daemon=True).start()
+        return jsonify({"success": True, "job_id": job_id})
     finally:
-        # limpiar temporal si quedó
+        # Limpieza: se realiza al finalizar el job.
+        pass
+
+
+def _set_job_progress(job_id: str, progress: int, status: str | None = None, done: bool | None = None):
+    with job_lock:
+        if job_id not in progress_by_job:
+            progress_by_job[job_id] = {"success": True, "job_id": job_id}
+        progress_by_job[job_id]["progress"] = int(max(0, min(100, progress)))
+        if status is not None:
+            progress_by_job[job_id]["status"] = status
+        if done is not None:
+            progress_by_job[job_id]["done"] = bool(done)
+
+
+def _set_job_result(job_id: str, payload: dict):
+    with job_lock:
+        result_by_job[job_id] = payload
+
+
+def _run_detection_job(job_id: str, temp_path: str, ext: str):
+    try:
+        _set_job_progress(job_id, 1, status="starting")
+        if ext in {"jpg", "jpeg", "png"}:
+            _process_image_and_persist(job_id, temp_path)
+        elif ext in {"mp4", "avi", "mov"}:
+            _process_video_and_persist(job_id, temp_path)
+        else:
+            _set_job_result(job_id, {"success": False, "error": "Tipo de archivo no soportado"})
+        _set_job_progress(job_id, 100, status="done", done=True)
+    except Exception as e:
+        _set_job_result(job_id, {"success": False, "error": str(e)})
+        _set_job_progress(job_id, 100, status="error", done=True)
+    finally:
         if os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
@@ -639,10 +731,12 @@ def upload_detect():
                 pass
 
 
-def _process_image_and_persist(path: str):
+def _process_image_and_persist(job_id: str, path: str):
     image = cv2.imread(path)
     if image is None:
-        return jsonify({"success": False, "error": "No se pudo leer la imagen"}), 400
+        raise RuntimeError("No se pudo leer la imagen")
+
+    _set_job_progress(job_id, 10, status="infering")
 
     h, w = image.shape[:2]
     if w > 1280 or h > 720:
@@ -652,46 +746,99 @@ def _process_image_and_persist(path: str):
     results = yolo_model(image, device=YOLO_CONFIG["device"], conf=YOLO_CONFIG["confidence"], verbose=YOLO_CONFIG["verbose"])
     image, detection_list = draw_detections(image, results)
 
-    out_name = f"result_{int(time.time())}.jpg"
+    out_name = f"result_{job_id}.jpg"
     out_path = os.path.join(app.config["RESULTS_FOLDER"], out_name)
     cv2.imwrite(out_path, image)
 
     avg_conf = float(np.mean([d["confidence"] for d in detection_list])) if detection_list else 0.0
-    return jsonify(
+    _set_job_result(
+        job_id,
         {
             "success": True,
             "result_type": "image",
             "result_url": f"/static/results/{out_name}",
             "detections_count": len(detection_list),
             "avg_confidence": avg_conf,
-        }
+        },
     )
 
 
-def _process_video_and_persist(path: str):
+def _open_writer_h264(path: str, fps: float, width: int, height: int):
+    # Intentar H.264 directo si la build de OpenCV/FFmpeg lo soporta.
+    for fourcc_name in ("avc1", "H264"):
+        try:
+            fourcc = cv2.VideoWriter_fourcc(*fourcc_name)
+            out = cv2.VideoWriter(path, fourcc, float(fps), (width, height))
+            if out.isOpened():
+                return out, fourcc_name
+        except Exception:
+            pass
+    return None, None
+
+
+def _ffmpeg_transcode_h264(src_path: str, dst_path: str):
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return False
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        src_path,
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        dst_path,
+    ]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return True
+
+
+def _process_video_and_persist(job_id: str, path: str):
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():
-        return jsonify({"success": False, "error": "No se pudo leer el video"}), 400
+        raise RuntimeError("No se pudo leer el video")
 
     fps = cap.get(cv2.CAP_PROP_FPS) or VIDEO_CONFIG["fps"]
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or VIDEO_CONFIG["width"]
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or VIDEO_CONFIG["height"]
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
 
     if width > 1280 or height > 720:
         scale = min(1280 / width, 720 / height)
         width = int(width * scale)
         height = int(height * scale)
 
-    out_name = f"result_{int(time.time())}.mp4"
+    out_name = f"result_{job_id}.mp4"
     out_path = os.path.join(app.config["RESULTS_FOLDER"], out_name)
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out = cv2.VideoWriter(out_path, fourcc, float(fps), (width, height))
+    tmp_path = os.path.join(app.config["RESULTS_FOLDER"], f"tmp_{job_id}.mp4")
+
+    out, used = _open_writer_h264(out_path, fps, width, height)
+    wrote_to = out_path
+    if out is None:
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        out = cv2.VideoWriter(tmp_path, fourcc, float(fps), (width, height))
+        wrote_to = tmp_path
+        used = "mp4v"
+    if not out.isOpened():
+        raise RuntimeError("No se pudo crear el writer de video (codec).")
 
     frame_count = 0
     total_detections = 0
     total_conf = 0.0
 
     try:
+        try:
+            from tqdm import tqdm  # type: ignore
+
+            iterator = tqdm(total=total_frames if total_frames > 0 else None, desc="Procesando video", unit="frame")
+        except Exception:
+            iterator = None
+
+        _set_job_progress(job_id, 1, status="processing")
         while True:
             ret, frame = cap.read()
             if not ret:
@@ -709,12 +856,39 @@ def _process_video_and_persist(path: str):
 
             out.write(frame)
             frame_count += 1
+
+            if iterator is not None:
+                iterator.update(1)
+
+            if total_frames > 0 and frame_count % 3 == 0:
+                _set_job_progress(job_id, int((frame_count / total_frames) * 100), status="processing")
+            elif total_frames <= 0 and frame_count % 15 == 0:
+                approx = min(95, 5 + int(frame_count / max(1, int(VIDEO_CONFIG.get("fps", 30)))))
+                _set_job_progress(job_id, approx, status="processing")
     finally:
+        try:
+            if iterator is not None:
+                iterator.close()
+        except Exception:
+            pass
         cap.release()
         out.release()
 
+    # Si no se pudo escribir H.264 directo, transcodificar a libx264 si existe ffmpeg.
+    if used not in {"avc1", "H264"} and wrote_to != out_path:
+        try:
+            ok = _ffmpeg_transcode_h264(wrote_to, out_path)
+            if not ok:
+                shutil.copyfile(wrote_to, out_path)
+        finally:
+            try:
+                os.remove(wrote_to)
+            except Exception:
+                pass
+
     avg_conf = (total_conf / max(1, frame_count)) if frame_count else 0.0
-    return jsonify(
+    _set_job_result(
+        job_id,
         {
             "success": True,
             "result_type": "video",
@@ -722,15 +896,18 @@ def _process_video_and_persist(path: str):
             "frames_processed": frame_count,
             "total_detections": total_detections,
             "avg_confidence": float(avg_conf),
-        }
+        },
     )
 
 
 # ======================== INIT ========================
 with app.app_context():
     db.create_all()
-    get_or_create_camera_config()
+    cfg = get_or_create_camera_config()
     bootstrap_users()
+    with state_lock:
+        camera_source_mode = "ptz" if (cfg.camera_type == "ptz") else "fixed"
+        current_detection_state["camera_source_mode"] = camera_source_mode
 
 
 if __name__ == "__main__":
