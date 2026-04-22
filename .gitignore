@@ -7,7 +7,7 @@ ENV/
 
 # Dataset (puede ser grande)
 dataset/
-
+detections_frames/
 # Modelos entrenados
 runs/
 *.pt
