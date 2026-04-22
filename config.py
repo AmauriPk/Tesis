@@ -2,6 +2,30 @@
 # Archivo de configuración para el sistema de detección de drones
 # Personaliza estos valores según tu entorno
 
+import os
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    value = value.strip().lower()
+    if value in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if value in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    return default
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return int(value.strip())
+    except Exception:
+        return default
+
 # ======================== CONFIGURACIÓN RTSP ========================
 RTSP_CONFIG = {
     'enabled': True,           # Habilitar streaming RTSP
@@ -33,11 +57,11 @@ VIDEO_CONFIG = {
 
 # ======================== CONFIGURACIÓN DE FLASK ========================
 FLASK_CONFIG = {
-    'debug': False,            # Modo debug (no recomendado en producción)
-    'host': '0.0.0.0',        # Host (0.0.0.0 para acceso remoto)
-    'port': 5000,              # Puerto
-    'threaded': True,          # Soporte multi-thread
-    'max_content_length': 500 * 1024 * 1024,  # Máximo upload 500MB
+    'debug': _env_bool('FLASK_DEBUG', False),  # Modo debug (no recomendado en producción)
+    'host': os.environ.get('FLASK_HOST', '0.0.0.0'),  # Host (0.0.0.0 para acceso remoto)
+    'port': _env_int('FLASK_PORT', 5000),  # Puerto
+    'threaded': _env_bool('FLASK_THREADED', True),  # Soporte multi-thread
+    'max_content_length': _env_int('FLASK_MAX_CONTENT_LENGTH', 500 * 1024 * 1024),  # Máximo upload 500MB
 }
 
 # ======================== CONFIGURACIÓN DE ALMACENAMIENTO ========================

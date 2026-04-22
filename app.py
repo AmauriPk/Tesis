@@ -16,6 +16,7 @@ import numpy as np
 from flask import (
     Flask,
     Response,
+    abort,
     flash,
     jsonify,
     redirect,
@@ -38,6 +39,11 @@ try:
 except Exception:  # pragma: no cover
     torch = None
 
+try:
+    import ffmpeg  # type: ignore
+except Exception:  # pragma: no cover
+    ffmpeg = None
+
 from config import FLASK_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG
 from models import CameraConfig, User, db
 from ptz_controller import PTZController
@@ -48,6 +54,12 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
 
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///app.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+if FLASK_CONFIG.get("debug"):
+    # En desarrollo: recargar templates y evitar caché agresiva de estáticos.
+    app.config["TEMPLATES_AUTO_RELOAD"] = True
+    app.jinja_env.auto_reload = True
+    app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 app.config["MAX_CONTENT_LENGTH"] = FLASK_CONFIG["max_content_length"]
 app.config["UPLOAD_FOLDER"] = STORAGE_CONFIG.get("upload_folder", "uploads")
@@ -528,12 +540,36 @@ def logout():
     return redirect(url_for("login"))
 
 
+@app.get("/__diag")
+def diag():
+    """Diagnóstico rápido (solo en debug y localhost)."""
+    if not FLASK_CONFIG.get("debug"):
+        abort(404)
+    if request.remote_addr not in {"127.0.0.1", "::1"}:
+        abort(403)
+    return jsonify(
+        {
+            "app_file": __file__,
+            "root_path": app.root_path,
+            "template_folder": app.template_folder,
+            "debug": bool(FLASK_CONFIG.get("debug")),
+            "host": FLASK_CONFIG.get("host"),
+            "port": FLASK_CONFIG.get("port"),
+        }
+    )
+
+
 # ======================== UI ========================
 @app.route("/")
 @login_required
 def index():
     cfg = get_or_create_camera_config()
-    return render_template("index.html", is_admin=(current_user.role == "admin"), camera_type=cfg.camera_type)
+    return render_template(
+        "index.html",
+        is_admin=(current_user.role == "admin"),
+        camera_type=cfg.camera_type,
+        current_user=current_user,
+    )
 
 
 @app.route("/admin/camera", methods=["GET", "POST"])
@@ -616,6 +652,23 @@ def set_camera_source():
 def detection_status():
     with state_lock:
         return jsonify(dict(current_detection_state))
+
+
+@app.route("/video_progress")
+@login_required
+def video_progress():
+    job_id = (request.args.get("job_id") or "").strip()
+    if not job_id:
+        return jsonify({"success": False, "error": "Falta job_id"}), 400
+    with job_lock:
+        p = progress_by_job.get(job_id)
+        r = result_by_job.get(job_id)
+    if not p:
+        return jsonify({"success": False, "error": "Job no encontrado"}), 404
+    payload = dict(p)
+    if r:
+        payload.update(r)
+    return jsonify(payload)
 
 
 @app.route("/progress/<job_id>")
@@ -777,11 +830,24 @@ def _open_writer_h264(path: str, fps: float, width: int, height: int):
 
 
 def _ffmpeg_transcode_h264(src_path: str, dst_path: str):
-    ffmpeg = shutil.which("ffmpeg")
-    if not ffmpeg:
+    # Preferir ffmpeg-python si está disponible (requiere binario ffmpeg en PATH).
+    if ffmpeg is not None:
+        try:
+            (
+                ffmpeg.input(src_path)
+                .output(dst_path, vcodec="libx264", pix_fmt="yuv420p", movflags="+faststart")
+                .overwrite_output()
+                .run(quiet=True)
+            )
+            return True
+        except Exception:
+            pass
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
         return False
     cmd = [
-        ffmpeg,
+        ffmpeg_bin,
         "-y",
         "-i",
         src_path,
@@ -914,7 +980,8 @@ if __name__ == "__main__":
     print(f"[INFO] Servidor: http://localhost:{FLASK_CONFIG['port']}")
     app.run(
         debug=FLASK_CONFIG["debug"],
+        use_reloader=bool(FLASK_CONFIG.get("debug")),
         host=FLASK_CONFIG["host"],
         port=FLASK_CONFIG["port"],
-        threaded=True,
+        threaded=bool(FLASK_CONFIG.get("threaded", True)),
     )

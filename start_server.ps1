@@ -46,6 +46,7 @@ if (-not (Test-Path $appFile)) {
 # Activar entorno virtual
 Write-Info "Activando entorno virtual..."
 $activateScript = Join-Path $venvPath "Scripts" "Activate.ps1"
+$pythonExe = Join-Path $venvPath "Scripts" "python.exe"
 
 try {
     & $activateScript
@@ -58,12 +59,12 @@ try {
 
 # Verificar dependencias
 Write-Info "Verificando dependencias..."
-$checkDeps = python -c "import flask; import ultralytics; import cv2; print('OK')" 2>$null
+$checkDeps = & $pythonExe -c "import flask; import ultralytics; import cv2; print('OK')" 2>$null
 
 if ($checkDeps -ne "OK") {
     Write-Host "[WARNING] Algunas dependencias no están instaladas." -ForegroundColor Yellow
     Write-Info "Instalando dependencias..."
-    pip install -r requirements.txt --quiet
+    & $pythonExe -m pip install -r requirements.txt --quiet
     Write-Success "Dependencias instaladas."
 }
 
@@ -75,9 +76,14 @@ Write-Host "========================================"
 Write-Host ""
 Write-Host "[INFO] Servidor disponible en: http://localhost:5000" -ForegroundColor Cyan
 Write-Host "[INFO] Presiona Ctrl+C para detener el servidor" -ForegroundColor Yellow
+if (-not $env:FLASK_DEBUG) {
+    Write-Host "[TIP] Para ver cambios sin reiniciar, ejecuta con: `$env:FLASK_DEBUG='1' (y opcional `$env:FLASK_HOST='127.0.0.1')" -ForegroundColor DarkGray
+} else {
+    Write-Host "[INFO] FLASK_DEBUG=$env:FLASK_DEBUG (auto-reload activo si es '1')" -ForegroundColor DarkGray
+}
 Write-Host ""
 
 # Ejecutar Flask
-python app.py
+& $pythonExe $appFile
 
 Read-Host "Presiona Enter para salir"

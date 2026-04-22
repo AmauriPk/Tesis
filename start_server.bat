@@ -42,12 +42,12 @@ echo.
 
 REM Verificar que Flask está instalado
 echo [*] Verificando dependencias...
-python -c "import flask; import ultralytics; import cv2; print('[OK] Todas las dependencias disponibles.')" 2>nul
+venv_new\\Scripts\\python.exe -c "import flask; import ultralytics; import cv2; print('[OK] Todas las dependencias disponibles.')" 2>nul
 
 if errorlevel 1 (
     echo [WARNING] Algunas dependencias no están instaladas.
     echo [*] Instalando dependencias...
-    pip install -r requirements.txt --quiet
+    venv_new\\Scripts\\python.exe -m pip install -r requirements.txt --quiet
     if errorlevel 1 (
         echo ERROR: No se pudieron instalar las dependencias.
         pause
@@ -63,9 +63,15 @@ echo ========================================
 echo.
 echo [INFO] Servidor disponible en: http://localhost:5000
 echo [INFO] Presiona Ctrl+C para detener el servidor
+if "%FLASK_DEBUG%"=="" (
+    echo [TIP] Para ver cambios sin reiniciar: set FLASK_DEBUG=1
+    echo [TIP] (Opcional) Para solo local: set FLASK_HOST=127.0.0.1
+) else (
+    echo [INFO] FLASK_DEBUG=%FLASK_DEBUG% (auto-reload activo si es 1)
+)
 echo.
 
 REM Iniciar servidor Flask
-python app.py
+venv_new\\Scripts\\python.exe app.py
 
 pause
