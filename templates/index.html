@@ -188,6 +188,10 @@
                     </div>
 
                     <div class="col-xl-4">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="text-secondary">Hardware</span>
+                            <span id="hwBadge" class="badge text-bg-secondary">Cámara Detectada: --</span>
+                        </div>
                         <div class="card">
                             <div class="card-header">
                                 <i class="fa-solid fa-bell me-1"></i> Alertas / Estado
@@ -218,6 +222,44 @@
                                 <button class="btn btn-outline-light w-100" id="btnRefresh">
                                     <i class="fa-solid fa-arrows-rotate me-1"></i> Actualizar
                                 </button>
+                            </div>
+                        </div>
+
+                        <div class="card mt-3" id="ptzPanel" style="display:none;">
+                            <div class="card-header">
+                                <i class="fa-solid fa-arrows-to-circle me-1"></i> Panel de Control PTZ
+                            </div>
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <span class="text-secondary">Tracking Automático</span>
+                                    <div class="form-check form-switch m-0">
+                                        <input class="form-check-input" type="checkbox" role="switch" id="autoTrackingToggle" />
+                                    </div>
+                                </div>
+
+                                <div class="d-grid gap-2" style="grid-template-columns: 1fr 1fr 1fr;">
+                                    <div></div>
+                                    <button class="btn btn-outline-success" id="ptzUp" type="button" title="Arriba">
+                                        <i class="fa-solid fa-chevron-up"></i>
+                                    </button>
+                                    <div></div>
+
+                                    <button class="btn btn-outline-success" id="ptzLeft" type="button" title="Izquierda">
+                                        <i class="fa-solid fa-chevron-left"></i>
+                                    </button>
+                                    <button class="btn btn-outline-danger" id="ptzStop" type="button" title="Stop">
+                                        <i class="fa-solid fa-stop"></i>
+                                    </button>
+                                    <button class="btn btn-outline-success" id="ptzRight" type="button" title="Derecha">
+                                        <i class="fa-solid fa-chevron-right"></i>
+                                    </button>
+
+                                    <div></div>
+                                    <button class="btn btn-outline-success" id="ptzDown" type="button" title="Abajo">
+                                        <i class="fa-solid fa-chevron-down"></i>
+                                    </button>
+                                    <div></div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -321,6 +363,107 @@
             } catch (_) {}
         }
 
+        async function initHardwareUI() {
+            const badge = document.getElementById('hwBadge');
+            const panel = document.getElementById('ptzPanel');
+            if (!badge || !panel) return;
+
+            let isPTZ = false;
+            try {
+                const r = await fetch('/api/camera_status?_=' + Date.now());
+                const d = await r.json();
+                isPTZ = !!d.is_ptz_capable;
+            } catch (_) {
+                isPTZ = false;
+            }
+
+            if (isPTZ) {
+                badge.textContent = 'Cámara Detectada: PTZ';
+                badge.classList.remove('text-bg-secondary');
+                badge.classList.add('text-bg-success');
+                panel.style.display = '';
+                setupPTZPanel();
+            } else {
+                badge.textContent = 'Cámara Detectada: Fija';
+                badge.classList.remove('text-bg-success');
+                badge.classList.add('text-bg-secondary');
+                panel.remove(); // ocultar/destruir panel PTZ del DOM
+            }
+        }
+
+        function setupPTZPanel() {
+            const toggle = document.getElementById('autoTrackingToggle');
+            const btnUp = document.getElementById('ptzUp');
+            const btnDown = document.getElementById('ptzDown');
+            const btnLeft = document.getElementById('ptzLeft');
+            const btnRight = document.getElementById('ptzRight');
+            const btnStop = document.getElementById('ptzStop');
+
+            if (toggle) {
+                fetch('/api/auto_tracking?_=' + Date.now())
+                    .then(r => r.json())
+                    .then(d => { toggle.checked = !!d.enabled; })
+                    .catch(_ => {});
+
+                toggle.addEventListener('change', async () => {
+                    try {
+                        await fetch('/api/auto_tracking', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ enabled: !!toggle.checked })
+                        });
+                    } catch (_) {}
+                });
+            }
+
+            bindHoldMove(btnUp, 0.0, 0.55);
+            bindHoldMove(btnDown, 0.0, -0.55);
+            bindHoldMove(btnLeft, -0.55, 0.0);
+            bindHoldMove(btnRight, 0.55, 0.0);
+
+            if (btnStop) {
+                btnStop.addEventListener('click', ptzStop);
+            }
+        }
+
+        function bindHoldMove(btn, x, y) {
+            if (!btn) return;
+            let timer = null;
+
+            const start = () => {
+                if (timer) return;
+                ptzMove(x, y);
+                timer = setInterval(() => ptzMove(x, y), 250);
+            };
+            const stop = () => {
+                if (!timer) return;
+                clearInterval(timer);
+                timer = null;
+                ptzStop();
+            };
+
+            btn.addEventListener('pointerdown', (e) => { e.preventDefault(); start(); });
+            btn.addEventListener('pointerup', (e) => { e.preventDefault(); stop(); });
+            btn.addEventListener('pointercancel', (e) => { e.preventDefault(); stop(); });
+            btn.addEventListener('pointerleave', (e) => { e.preventDefault(); stop(); });
+        }
+
+        async function ptzMove(x, y) {
+            try {
+                await fetch('/ptz_move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ x, y, zoom: 0.0, duration_s: 0.18 })
+                });
+            } catch (_) {}
+        }
+
+        async function ptzStop() {
+            try {
+                await fetch('/ptz_stop', { method: 'POST' });
+            } catch (_) {}
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('btnUpload').addEventListener('click', uploadDetect);
             document.getElementById('btnReset').addEventListener('click', resetManual);
@@ -332,6 +475,8 @@
             document.getElementById('btnRefresh').addEventListener('click', refreshStatus);
             setInterval(refreshStatus, ALERT_UPDATE_INTERVAL);
             refreshStatus();
+
+            initHardwareUI();
         });
 
         function updateProgressUI(pct, status) {

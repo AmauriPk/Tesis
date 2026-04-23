@@ -184,7 +184,13 @@ yolo_model = load_yolo_model()
 state_lock = threading.Lock()
 stream_lock = threading.Lock()
 
-camera_source_mode = "fixed"  # fixed | ptz (controlado por DB; admin lo define en /admin/camera)
+camera_source_mode = "fixed"  # fixed | ptz (autodescubrimiento ONVIF)
+
+# Autodescubrimiento de hardware (NO confiar en selector manual).
+is_ptz_capable = False
+auto_tracking_enabled = False
+_onvif_last_probe_at: float | None = None
+_onvif_last_probe_error: str | None = None
 
 current_detection_state = {
     "status": "Zona despejada",
@@ -224,6 +230,94 @@ def _bbox_off_center(frame_w: int, frame_h: int, bbox_xyxy):
     return "up" if dy < 0 else "down"
 
 
+def _bbox_offset_norm(frame_w: int, frame_h: int, bbox_xyxy) -> tuple[float, float]:
+    x1, y1, x2, y2 = bbox_xyxy
+    cx = (x1 + x2) / 2.0
+    cy = (y1 + y2) / 2.0
+    center_x = frame_w / 2.0
+    center_y = frame_h / 2.0
+
+    dx = (cx - center_x) / max(1.0, (frame_w / 2.0))  # -1..1
+    dy = (cy - center_y) / max(1.0, (frame_h / 2.0))  # -1..1 (positivo hacia abajo)
+    return float(dx), float(dy)
+
+
+def _clamp(v: float, lo: float, hi: float) -> float:
+    return float(max(lo, min(hi, v)))
+
+
+def _set_ptz_capable(value: bool, *, error: str | None = None) -> None:
+    global is_ptz_capable, camera_source_mode, _onvif_last_probe_error, auto_tracking_enabled
+    with state_lock:
+        is_ptz_capable = bool(value)
+        _onvif_last_probe_error = error
+        if not is_ptz_capable:
+            auto_tracking_enabled = False
+        camera_source_mode = "ptz" if is_ptz_capable else "fixed"
+        current_detection_state["camera_source_mode"] = camera_source_mode
+
+
+def _probe_onvif_ptz_capability() -> bool:
+    """
+    Autodescubre PTZ por ONVIF:
+    - Si existe Capabilities.PTZ (XAddr) o el servicio PTZ responde, es PTZ.
+    - Si falla cualquier paso (incl. conexión/credenciales), se asume Fija.
+    """
+    global _onvif_last_probe_at
+    with app.app_context():
+        cfg = get_or_create_camera_config()
+        host = (cfg.onvif_host or "").strip()
+        port = int(cfg.onvif_port or 80)
+        username = (cfg.onvif_username or "").strip()
+        password = (cfg.onvif_password or "").strip()
+
+    _onvif_last_probe_at = time.time()
+
+    if not host:
+        _set_ptz_capable(False, error="ONVIF host no configurado.")
+        return False
+    if not username or not password:
+        _set_ptz_capable(False, error="Credenciales ONVIF incompletas.")
+        return False
+
+    try:
+        from onvif import ONVIFCamera  # type: ignore
+
+        cam = ONVIFCamera(host, port, username, password)
+
+        # Opción A: Capabilities
+        try:
+            dev = cam.create_devicemgmt_service()
+            caps = dev.GetCapabilities({"Category": "All"})
+            ptz_caps = getattr(caps, "PTZ", None)
+            xaddr = getattr(ptz_caps, "XAddr", None) if ptz_caps is not None else None
+            if xaddr:
+                _set_ptz_capable(True, error=None)
+                return True
+        except Exception:
+            pass
+
+        # Opción B: crear PTZ service y pedir capacidades
+        try:
+            ptz = cam.create_ptz_service()
+            _ = ptz.GetServiceCapabilities()
+            _set_ptz_capable(True, error=None)
+            return True
+        except Exception as e:
+            _set_ptz_capable(False, error=str(e))
+            return False
+    except Exception as e:
+        _set_ptz_capable(False, error=str(e))
+        return False
+
+
+def _maybe_refresh_onvif_probe(max_age_s: float = 15.0) -> None:
+    last = _onvif_last_probe_at
+    if last is not None and (time.time() - last) < float(max_age_s):
+        return
+    threading.Thread(target=_probe_onvif_ptz_capability, daemon=True).start()
+
+
 def _ptz_vector(direction: str):
     # Mapeo simple. Ajustar según el PTZ real.
     if direction == "left":
@@ -243,7 +337,7 @@ class PTZCommandWorker:
     """
 
     def __init__(self):
-        self._q: queue.Queue[str] = queue.Queue(maxsize=50)
+        self._q: queue.Queue[dict] = queue.Queue(maxsize=80)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._controller: PTZController | None = None
@@ -253,9 +347,21 @@ class PTZCommandWorker:
         if not self._thread.is_alive():
             self._thread.start()
 
-    def enqueue(self, direction: str):
+    def enqueue_move(self, *, x: float, y: float, zoom: float = 0.0, duration_s: float = 0.15):
         try:
-            self._q.put_nowait(direction)
+            self._q.put_nowait(
+                {"type": "move", "x": float(x), "y": float(y), "zoom": float(zoom), "duration_s": float(duration_s)}
+            )
+        except Exception:
+            pass
+
+    def enqueue_direction(self, direction: str):
+        x, y, z = _ptz_vector(direction)
+        self.enqueue_move(x=x, y=y, zoom=z, duration_s=0.15)
+
+    def enqueue_stop(self):
+        try:
+            self._q.put_nowait({"type": "stop"})
         except Exception:
             pass
 
@@ -275,23 +381,33 @@ class PTZCommandWorker:
     def _run(self):
         while not self._stop.is_set():
             try:
-                direction = self._q.get(timeout=0.2)
+                cmd = self._q.get(timeout=0.2)
             except queue.Empty:
                 continue
 
-            # Rate limit (evita saturar PTZ)
-            now = time.time()
-            if now - self._last_cmd_at < 0.25:
-                continue
-            self._last_cmd_at = now
+            cmd_type = (cmd.get("type") or "").lower()
+
+            # Rate limit (evita saturar PTZ) - sólo moves
+            if cmd_type == "move":
+                now = time.time()
+                if now - self._last_cmd_at < 0.20:
+                    continue
+                self._last_cmd_at = now
 
             try:
                 if self._controller is None:
                     self._controller = self._get_controller()
                 if self._controller is None:
                     continue
-                x, y, z = _ptz_vector(direction)
-                self._controller.continuous_move(x=x, y=y, zoom=z, duration_s=0.15)
+                if cmd_type == "stop":
+                    self._controller.stop()
+                    continue
+                if cmd_type == "move":
+                    x = float(cmd.get("x") or 0.0)
+                    y = float(cmd.get("y") or 0.0)
+                    z = float(cmd.get("zoom") or 0.0)
+                    duration_s = float(cmd.get("duration_s") or 0.15)
+                    self._controller.continuous_move(x=x, y=y, zoom=z, duration_s=duration_s)
             except Exception as e:
                 print(f"[PTZ][ERROR] {e}")
                 self._controller = None
@@ -433,15 +549,21 @@ class _LiveVideoProcessor:
                     print(f"[YOLO][ERROR] {e}")
                     cv2.putText(frame, "Error en inferencia", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-            # Regla adaptativa: si PTZ y bbox fuera del centro -> encolar comando en hilo PTZ
+            # Tracking automático: si PTZ y bbox fuera del centro -> encolar comando PTZ (hilo separado)
             with state_lock:
                 mode = camera_source_mode
-            if mode == "ptz" and detection_list:
+                tracking = bool(auto_tracking_enabled)
+            if mode == "ptz" and tracking and detection_list:
                 best = max(detection_list, key=lambda d: d["confidence"])
                 h, w = frame.shape[:2]
-                direction = _bbox_off_center(w, h, best["bbox"])
-                if direction:
-                    ptz_worker.enqueue(direction)
+                dx, dy = _bbox_offset_norm(w, h, best["bbox"])  # dy>0 => bbox abajo
+                # Umbral central (evitar jitter)
+                if abs(dx) > 0.12 or abs(dy) > 0.12:
+                    # Pan positivo hacia derecha, Tilt positivo hacia arriba (invertir dy)
+                    k = 0.55
+                    x = _clamp(dx * k, -0.6, 0.6)
+                    y = _clamp((-dy) * k, -0.6, 0.6)
+                    ptz_worker.enqueue_move(x=x, y=y, zoom=0.0, duration_s=0.12)
 
             # Estado UI
             with state_lock:
@@ -622,10 +744,8 @@ def admin_camera():
         cfg.onvif_password = (request.form.get("onvif_password") or "").strip() or None
 
         db.session.commit()
-        with state_lock:
-            global camera_source_mode
-            camera_source_mode = "ptz" if (cfg.camera_type == "ptz") else "fixed"
-            current_detection_state["camera_source_mode"] = camera_source_mode
+        # Autodescubrimiento (no confiar en camera_type).
+        _probe_onvif_ptz_capability()
         flash("Configuración de cámara guardada.", "success")
         return redirect(url_for("admin_camera"))
 
@@ -658,6 +778,80 @@ def video_feed():
 def detection_status():
     with state_lock:
         return jsonify(dict(current_detection_state))
+
+
+@app.get("/api/camera_status")
+@login_required
+def camera_status():
+    _maybe_refresh_onvif_probe(max_age_s=15.0)
+    with state_lock:
+        return jsonify({"is_ptz_capable": bool(is_ptz_capable)})
+
+
+@app.route("/api/auto_tracking", methods=["GET", "POST"])
+@login_required
+def api_auto_tracking():
+    global auto_tracking_enabled
+    if request.method == "GET":
+        with state_lock:
+            return jsonify({"enabled": bool(auto_tracking_enabled)})
+
+    payload = {}
+    try:
+        payload = request.get_json(silent=True) or {}
+    except Exception:
+        payload = {}
+
+    enabled = payload.get("enabled", None)
+    if enabled is None:
+        enabled_txt = (request.form.get("enabled") or "").strip().lower()
+        enabled = enabled_txt in {"1", "true", "t", "yes", "y", "on"}
+
+    with state_lock:
+        # Seguridad: no habilitar tracking si el hardware no es PTZ.
+        auto_tracking_enabled = bool(enabled) and bool(is_ptz_capable)
+        return jsonify({"enabled": bool(auto_tracking_enabled)})
+
+
+def _require_ptz_capable() -> None:
+    with state_lock:
+        ok = bool(is_ptz_capable)
+    if not ok:
+        abort(403)
+
+
+@app.post("/ptz_move")
+@login_required
+def ptz_move():
+    _require_ptz_capable()
+    payload = request.get_json(silent=True) or {}
+    direction = (payload.get("direction") or "").strip().lower()
+    if direction:
+        ptz_worker.enqueue_direction(direction)
+        return jsonify({"ok": True})
+
+    try:
+        x = float(payload.get("x") or 0.0)
+        y = float(payload.get("y") or 0.0)
+        zoom = float(payload.get("zoom") or 0.0)
+        duration_s = float(payload.get("duration_s") or 0.15)
+    except Exception:
+        return jsonify({"ok": False, "error": "Payload inválido."}), 400
+
+    x = _clamp(x, -1.0, 1.0)
+    y = _clamp(y, -1.0, 1.0)
+    zoom = _clamp(zoom, -1.0, 1.0)
+    duration_s = _clamp(duration_s, 0.05, 0.6)
+    ptz_worker.enqueue_move(x=x, y=y, zoom=zoom, duration_s=duration_s)
+    return jsonify({"ok": True})
+
+
+@app.post("/ptz_stop")
+@login_required
+def ptz_stop():
+    _require_ptz_capable()
+    ptz_worker.enqueue_stop()
+    return jsonify({"ok": True})
 
 
 @app.route("/video_progress")
@@ -977,9 +1171,7 @@ with app.app_context():
     db.create_all()
     cfg = get_or_create_camera_config()
     bootstrap_users()
-    with state_lock:
-        camera_source_mode = "ptz" if (cfg.camera_type == "ptz") else "fixed"
-        current_detection_state["camera_source_mode"] = camera_source_mode
+    _probe_onvif_ptz_capability()
 
 
 if __name__ == "__main__":
