@@ -1,0 +1,67 @@
+:root{
+  --bg0:#0b0e14;
+  --bg1:#161b22;
+  --bd:#30363d;
+  --txt:#ffffff;
+  --neon:#00ff00;
+}
+
+/* ===== EMERGENCIA: VISIBILIDAD / CONTRASTE (BLINDADO) ===== */
+body, .card, .form-label, label, h2{
+  color: #FFFFFF !important;
+  text-shadow: 1px 1px 2px #000000;
+}
+
+html, body{
+  background: var(--bg0) !important;
+  color: var(--txt) !important;
+}
+
+label, .form-label, h1, h2, h3, p, span{
+  color: var(--txt) !important;
+  opacity: 1 !important;
+}
+
+.card{
+  background: var(--bg1) !important;
+  border: 1px solid var(--bd) !important;
+}
+
+.card-header{
+  background: #0b0e14 !important;
+  border-bottom: 1px solid var(--bd) !important;
+  color: #FFFFFF !important;
+  text-shadow: 1px 1px 2px #000000;
+}
+
+.text-secondary, .form-text{
+  color: var(--txt) !important;
+  opacity: .9 !important;
+}
+
+.form-control, .form-select{
+  background: #0f141b !important;
+  color: var(--txt) !important;
+  border: 1px solid var(--bd) !important;
+}
+
+.form-control::placeholder{
+  color: var(--txt) !important;
+  opacity: .6 !important;
+}
+
+.form-control:focus, .form-select:focus{
+  border-color: var(--txt) !important;
+  box-shadow: none !important;
+}
+
+.metric-value, .mono-neon{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+  color: var(--neon) !important;
+}
+
+.video-frame{
+  border: 1px solid var(--bd) !important;
+  background: #000 !important;
+  border-radius: .5rem !important;
+}
