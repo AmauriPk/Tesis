@@ -54,9 +54,6 @@ YOLO_CONFIG = {
     "device": os.environ.get("YOLO_DEVICE", "cuda:0"),  # GPU a usar (cuda:0 para RTX 4060)
     "confidence": _env_float("YOLO_CONFIDENCE", 0.8),  # Threshold de confianza mínimo
     "verbose": _env_bool("YOLO_VERBOSE", False),  # Mostrar logs YOLO detallados
-    # Claves legacy (reservadas para futuras extensiones).
-    "save_detections": True,
-    "min_confidence_db": 0.80,
 }
 
 # ======================== CONFIGURACIÓN DE VIDEO ========================
@@ -83,7 +80,4 @@ STORAGE_CONFIG = {
     "upload_folder": os.environ.get("UPLOAD_FOLDER", "uploads"),
     "detections_frames_folder": os.environ.get("DETECTIONS_FRAMES_FOLDER", "detections_frames"),
     "allowed_extensions": {"png", "jpg", "jpeg", "mp4", "avi", "mov"},
-    # Claves legacy (no usadas actualmente por el servidor).
-    "cleanup_old_uploads": True,
-    "cleanup_days": 7,
 }

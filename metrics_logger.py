@@ -194,11 +194,12 @@ class MetricsDBWriter:
                         )
 
                     con.commit()
-                except Exception:
+                except (sqlite3.DatabaseError, sqlite3.IntegrityError, sqlite3.OperationalError) as e:
                     # Fail-safe: si algo sale mal con DB, no detenemos el sistema.
+                    print(f"[METRICS_DB] Insert error: {e}")
                     try:
                         con.rollback()
-                    except Exception:
+                    except sqlite3.Error:
                         pass
                 finally:
                     pending = []
@@ -221,6 +222,6 @@ class MetricsDBWriter:
             try:
                 if con is not None:
                     con.close()
-            except Exception:
+            except sqlite3.Error:
                 pass
 

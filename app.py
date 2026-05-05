@@ -24,7 +24,6 @@ import sqlite3
 import subprocess
 import threading
 import time
-import heapq
 from datetime import datetime
 from functools import wraps
 from urllib.parse import urlparse
@@ -65,7 +64,7 @@ try:
 except Exception:  # pragma: no cover
     ffmpeg = None
 
-from config import FLASK_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG
+from config import FLASK_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG, _env_float, _env_int
 from models import CameraConfig, User, db
 from ptz_controller import PTZController
 from metrics_logger import FrameRecord, MetricsDBWriter
@@ -283,8 +282,8 @@ def leer_config_camara() -> bool:
     except FileNotFoundError:
         print(f"[CAMERA_CFG] read {path} -> MISSING (default False)")
         return False
-    except Exception:
-        print(f"[CAMERA_CFG] read {path} -> ERROR (default False)")
+    except (json.JSONDecodeError, ValueError, KeyError) as e:
+        print(f"[CAMERA_CFG] read {path} -> PARSE ERROR: {e} (default False)")
         # Fail-safe: ante corrupciones/parcial, asumir fija.
         return False
 
@@ -337,40 +336,7 @@ def is_camera_configured_ptz() -> bool:
     return bool(leer_config_camara())
 
 
-def _env_float(name: str, default: float) -> float:
-    """
-    Lee una variable de entorno como float con fallback seguro.
-
-    Args:
-        name: Nombre de la variable de entorno.
-        default: Valor por defecto si no existe o no es convertible.
-
-    Returns:
-        Valor convertido a float o `default`.
-    """
-    try:
-        return float(os.environ.get(name, str(default)))
-    except Exception:
-        # NOTE: Idealmente capturar ValueError/TypeError para no ocultar errores inesperados.
-        return float(default)
-
-
-def _env_int(name: str, default: int) -> int:
-    """
-    Lee una variable de entorno como int con fallback seguro.
-
-    Args:
-        name: Nombre de la variable de entorno.
-        default: Valor por defecto si no existe o no es convertible.
-
-    Returns:
-        Valor convertido a int o `default`.
-    """
-    try:
-        return int(os.environ.get(name, str(default)))
-    except Exception:
-        # NOTE: Idealmente capturar ValueError/TypeError para no ocultar errores inesperados.
-        return int(default)
+# _env_float() and _env_int() are now imported from config.py (consolidation of duplicated code)
 
 
 MODEL_PARAMS = {
@@ -422,8 +388,10 @@ def update_model_params(*, confidence_threshold: float, persistence_frames: int,
 # Requiere que la detección "persista" por N frames consecutivos antes de marcar `detected=True`
 # y antes de activar tracking PTZ automático. Esto reduce falsos positivos por aves/ruido.
 try:
-    DETECTION_PERSISTENCE_FRAMES = max(1, int(os.environ.get("DETECTION_PERSISTENCE_FRAMES", "3")))
-except Exception:
+    raw_dpf = os.environ.get("DETECTION_PERSISTENCE_FRAMES", "3").strip()
+    DETECTION_PERSISTENCE_FRAMES = max(1, int(raw_dpf))
+except (ValueError, TypeError) as e:
+    print(f"[WARN] DETECTION_PERSISTENCE_FRAMES='{raw_dpf}' invalid: {e}, using default=3")
     DETECTION_PERSISTENCE_FRAMES = 3
 
 # Autodescubrimiento de hardware (NO confiar en selector manual).
@@ -1065,7 +1033,7 @@ class _RTSPLatestFrameReader:
 
                 ret, frame = cap.read()
                 if not ret or frame is None:
-                    print("[RTSP] Lectura fallida. Reintentando conexión...")
+                    print(f"[RTSP][WARN] Read failed on {self._current_url}, reconnecting...")
                     try:
                         cap.release()
                     except Exception:
@@ -1189,9 +1157,10 @@ class _LiveVideoProcessor:
             try:
                 if frame.shape[1] != target_w or frame.shape[0] != target_h:
                     frame = cv2.resize(frame, (target_w, target_h))
-            except Exception:
-                # NOTE: Idealmente capturar `cv2.error` o `AttributeError` segun el origen del fallo.
-                pass
+            except cv2.error as e_cv:
+                print(f"[VIDEO][CV2_ERROR] Frame resize failed: {e_cv}")
+            except (AttributeError, TypeError) as e:
+                print(f"[VIDEO][ERROR] Frame shape check failed: {e}")
 
             self._frame_count += 1
 
@@ -1218,11 +1187,11 @@ class _LiveVideoProcessor:
                     self._detection_times.append(dt)
                     self._detection_times = self._detection_times[-30:]
                     frame, detection_list = draw_detections(frame, results)
+                except cv2.error as e_cv:
+                    print(f"[YOLO][CV2_ERROR] {e_cv}")
+                except RuntimeError as e_rt:
+                    print(f"[YOLO][RUNTIME_ERROR] {e_rt}")
                 except Exception as e:
-                    # NOTE: Aqui conviene capturar excepciones mas especificas:
-                    # - `RuntimeError` (CUDA/torch)
-                    # - `cv2.error` (si el frame es invalido)
-                    # - Errores de `ultralytics` al parsear resultados
                     print(f"[YOLO][ERROR] {e}")
                     cv2.putText(frame, "Error en inferencia", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 

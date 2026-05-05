@@ -63,7 +63,7 @@ def main() -> None:
         
         # --- Organización ---
         project="runs/detect",
-        name="drone_model_v1_MuSGD", # Cambiamos nombre para comparar resultados
+        name="drone_model_v1",
         exist_ok=True,
         save=True,
         plots=True
@@ -71,8 +71,12 @@ def main() -> None:
     
     # Ruta final del modelo
     best_model = project_root / "runs/detect/drone_model_v1/weights/best.pt"
-    print(f"\n✅ Proceso completado.")
-    print(f"📍 Modelo optimizado guardado en: {best_model}")
+    if best_model.exists():
+        print(f"\n✅ Proceso completado.")
+        print(f"📍 Modelo optimizado guardado en: {best_model}")
+    else:
+        print(f"\n⚠️ Entrenamiento completado pero no se encontró el modelo en: {best_model}")
+        print(f"Verifica la carpeta: {best_model.parent.parent}")
 
 if __name__ == "__main__":
     main()
