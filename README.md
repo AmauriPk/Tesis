@@ -100,6 +100,21 @@ En el frontend, el panel PTZ (joystick/botones y switch de tracking) se muestra 
 
 ## Documentación técnica complementaria
 
-- API REST: `Documentacion/API_REST.md`
-- Arquitectura de módulos: `Documentacion/ARQUITECTURA_MODULOS.md`
+- API REST: `Documentacion/api_rest.md`
+- Arquitectura de módulos: `Documentacion/arquitectura_modulos.md`
 
+## Entrenamiento del modelo (dataset propio)
+
+El dataset está en `dataset/` (formato YOLO) y el YAML principal es `dataset/data.yaml`.
+
+Entrenar (Ultralytics):
+- Opción simple (misma idea que tu `train.py`): `python train.py`
+- Opción parametrizable/reproducible: `python train_yolo26.py --data dataset/data.yaml --model yolo26s.pt --epochs 100 --imgsz 640 --batch 16 --device 0 --name rpas_micro_train`
+
+Pesos generados:
+- `runs/detect/train/weights/best.pt` (si usas `train.py`)
+- `runs/detect/rpas_micro_train/weights/best.pt` (si usas `train_yolo26.py`)
+
+Para usar esos pesos en el backend, define:
+- PowerShell (sesión actual): `$env:YOLO_MODEL_PATH="runs/detect/rpas_micro_train/weights/best.pt"`
+- Windows persistente: `setx YOLO_MODEL_PATH "runs/detect/rpas_micro_train/weights/best.pt"`

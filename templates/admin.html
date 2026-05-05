@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RPAS Micro | Admin</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+    <link rel="stylesheet" href="/static/style.css" />
+    <style>
+        .navbar{ background:rgba(18,24,29,.95); border-bottom:1px solid var(--bd); }
+        .form-hint{ font-size:.875rem; color:rgba(255,255,255,.72); }
+        .kbd-pill{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:.85rem; border:1px solid var(--bd); padding:.1rem .4rem; border-radius:.35rem; }
+        .lock-overlay{ position:absolute; inset:0; border-radius:.5rem; pointer-events:none; opacity:0; transition:opacity .15s ease; }
+        .locked .lock-overlay{ opacity:1; background:rgba(11,14,20,.25); }
+        .locked .lock-note{ display:flex !important; }
+        .lock-note{ display:none; align-items:center; gap:.5rem; color:rgba(255,255,255,.78); font-size:.9rem; }
+        .value-pill{ font-variant-numeric: tabular-nums; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg sticky-top">
+        <div class="container-fluid">
+            <span class="navbar-brand text-light fw-bold">
+                <i class="fa-solid fa-screwdriver-wrench me-2 text-warning"></i>Admin Dashboard
+            </span>
+            <div class="ms-auto">
+                <a class="btn btn-sm btn-outline-light" href="{{ url_for('logout') }}">Salir</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-4" style="max-width: 1280px;">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- =================== TOP NAV =================== -->
+        <ul class="nav nav-pills gap-2 mb-3" id="adminMainTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-camera" data-bs-toggle="tab" data-bs-target="#pane-camera" type="button" role="tab">
+                    <i class="fa-solid fa-camera me-1"></i> Cámara (Hardware)
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-params" data-bs-toggle="tab" data-bs-target="#pane-params" type="button" role="tab">
+                    <i class="fa-solid fa-sliders me-1"></i> Parámetros y Métricas
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-dataset" data-bs-toggle="tab" data-bs-target="#pane-dataset" type="button" role="tab">
+                    <i class="fa-solid fa-images me-1"></i> Gestor de Dataset
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content">
+            <!-- =================== CAMERA =================== -->
+            <div class="tab-pane fade show active" id="pane-camera" role="tabpanel" aria-labelledby="tab-camera">
+                <div class="row g-3">
+                    <div class="col-12 col-xxl-10">
+                        <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-3">
+                            <div>
+                                <h4 class="fw-bold mb-1">Configuración de Hardware (Cámara)</h4>
+                                <div class="form-hint">
+                                    Flujo recomendado: pega la <span class="kbd-pill">URL RTSP</span> → <span class="kbd-pill">Vincular y Probar</span> → Guardar.
+                                </div>
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge text-bg-secondary d-none" id="cameraModeBadge"></span>
+                                <button class="btn btn-sm btn-outline-light d-none" type="button" id="btnEdit">
+                                    <i class="fa-solid fa-pen-to-square me-1"></i> Editar
+                                </button>
+                            </div>
+                        </div>
+
+                        <form class="row g-3" method="post" action="{{ url_for('admin_camera') }}" autocomplete="off" id="cameraForm">
+                            <input type="hidden" name="camera_type" id="camera_type" value="{{ cfg.camera_type or 'fixed' }}" />
+
+                            <div class="col-12">
+                                <div class="card position-relative" id="rtspCard">
+                                    <div class="lock-overlay"></div>
+                                    <div class="card-header d-flex justify-content-between align-items-center">
+                                        <span>RTSP</span>
+                                        <span class="lock-note"><i class="fa-solid fa-lock"></i> Bloqueado</span>
+                                    </div>
+                                    <div class="card-body">
+                                        <label class="form-label" for="rtsp_url">URL RTSP</label>
+                                        <input class="form-control" id="rtsp_url" name="rtsp_url" placeholder="rtsp://admin:pass@192.168.1.108:554/stream"
+                                               value="{{ cfg.rtsp_url or '' }}" autocomplete="off" />
+                                        <div class="form-hint mt-2">
+                                            Si pegas una URL completa, se extrae automáticamente <b>Host</b>, <b>Usuario</b> y <b>Contraseña</b>.
+                                        </div>
+
+                                        <div class="row g-2 mt-2">
+                                            <div class="col-md-6">
+                                                <label class="form-label" for="rtsp_username">Usuario RTSP</label>
+                                                <input class="form-control" id="rtsp_username" name="rtsp_username" value="{{ cfg.rtsp_username or '' }}" autocomplete="off" />
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label" for="rtsp_password">Contraseña RTSP</label>
+                                                <div class="input-group">
+                                                    <input class="form-control" id="rtsp_password" name="rtsp_password" type="password" value="{{ cfg.rtsp_password or '' }}" autocomplete="off" />
+                                                    <button class="btn btn-outline-light" type="button" data-toggle-password="#rtsp_password" aria-label="Mostrar contraseña RTSP">
+                                                        <i class="fa-solid fa-eye"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-12">
+                                <div class="card position-relative" id="onvifCard">
+                                    <div class="lock-overlay"></div>
+                                    <div class="card-header d-flex justify-content-between align-items-center">
+                                        <span>ONVIF (Autodescubrimiento PTZ)</span>
+                                        <span class="lock-note"><i class="fa-solid fa-lock"></i> Bloqueado</span>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row g-2">
+                                            <div class="col-md-8">
+                                                <label class="form-label" for="onvif_host">Host (IP/DNS)</label>
+                                                <input class="form-control" id="onvif_host" name="onvif_host" placeholder="192.168.1.108"
+                                                       value="{{ cfg.onvif_host or '' }}" autocomplete="off" />
+                                                <div class="form-hint mt-1">Se autocompleta desde RTSP cuando aplica.</div>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <label class="form-label" for="onvif_port">Puerto</label>
+                                                <input class="form-control" id="onvif_port" name="onvif_port" list="onvifPortList" inputmode="numeric"
+                                                       value="{{ cfg.onvif_port or 80 }}" autocomplete="off" />
+                                                <datalist id="onvifPortList">
+                                                    <option value="80"></option>
+                                                    <option value="8000"></option>
+                                                    <option value="8899"></option>
+                                                    <option value="5000"></option>
+                                                </datalist>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-check form-switch mt-3">
+                                            <input class="form-check-input" type="checkbox" role="switch" id="sameCreds" checked />
+                                            <label class="form-check-label" for="sameCreds">
+                                                Usar las mismas credenciales para RTSP y ONVIF
+                                            </label>
+                                        </div>
+
+                                        <div class="row g-2 mt-2" id="onvifCredsRow">
+                                            <div class="col-md-6">
+                                                <label class="form-label" for="onvif_username">Usuario ONVIF</label>
+                                                <input class="form-control" id="onvif_username" name="onvif_username" value="{{ cfg.onvif_username or '' }}" autocomplete="off" />
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label" for="onvif_password">Contraseña ONVIF</label>
+                                                <div class="input-group">
+                                                    <input class="form-control" id="onvif_password" name="onvif_password" type="password" value="{{ cfg.onvif_password or '' }}" autocomplete="off" />
+                                                    <button class="btn btn-outline-light" type="button" data-toggle-password="#onvif_password" aria-label="Mostrar contraseña ONVIF">
+                                                        <i class="fa-solid fa-eye"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <hr class="border-secondary my-3" />
+
+                                        <div class="d-grid gap-2">
+                                            <button class="btn btn-success" type="button" id="btnLinkTest">
+                                                <span class="me-2 d-none" id="btnSpinner" role="status" aria-hidden="true">
+                                                    <span class="spinner-border spinner-border-sm"></span>
+                                                </span>
+                                                Vincular y Probar Cámara
+                                            </button>
+                                            <button class="btn btn-outline-light" type="submit" id="btnSave">
+                                                <i class="fa-solid fa-floppy-disk me-1"></i> Guardar configuración
+                                            </button>
+                                        </div>
+
+                                        <div class="alert alert-danger mt-3 mb-0 d-none" id="testError"></div>
+                                        <div class="alert alert-success mt-3 mb-0 d-none" id="testSuccess"></div>
+                                        <div class="alert alert-warning mt-3 mb-0 d-none" id="testWarning"></div>
+                                        <div class="form-hint mt-2">
+                                            El test usa <code>onvif-zeep</code>. Si RTSP falla pero ONVIF responde, se mostrará una advertencia.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+
+                        <div class="mt-3 d-none" id="snapshotWrap">
+                            <div class="card">
+                                <div class="card-header">Snapshot de Confirmación</div>
+                                <div class="card-body">
+                                    <figure class="mb-0">
+                                        <img id="snapshotImg" class="img-fluid rounded shadow-sm" alt="Vista previa RTSP" />
+                                        <figcaption class="form-hint mt-2" id="snapshotCaption"></figcaption>
+                                    </figure>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- =================== PARAMS =================== -->
+            <div class="tab-pane fade" id="pane-params" role="tabpanel" aria-labelledby="tab-params">
+                <div class="row g-3">
+                    <div class="col-12 col-xl-6 col-xxl-5">
+                        <h4 class="fw-bold mb-3">Ajuste de Parámetros del Modelo (YOLO26)</h4>
+                        <div class="card">
+                            <div class="card-header">Parámetros operativos</div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <label class="form-label mb-0" for="confSlider">Umbral de Confianza Mínima</label>
+                                        <span class="badge text-bg-dark value-pill" id="confValue"></span>
+                                    </div>
+                                    <input class="form-range" type="range" id="confSlider" min="0.10" max="1.00" step="0.01" value="{{ '%.2f'|format(model_params.confidence_threshold) }}">
+                                    <div class="form-hint">Baja el umbral para mayor sensibilidad; súbelo para menos falsos positivos.</div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <label class="form-label mb-0" for="persSlider">Frames de Persistencia (anti-aves)</label>
+                                        <span class="badge text-bg-dark value-pill" id="persValue"></span>
+                                    </div>
+                                    <input class="form-range" type="range" id="persSlider" min="1" max="10" step="1" value="{{ model_params.persistence_frames }}">
+                                    <div class="form-hint">Requiere detección continua durante N frames para confirmar alerta.</div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <label class="form-label mb-0" for="iouSlider">Umbral de IoU (seguimiento)</label>
+                                        <span class="badge text-bg-dark value-pill" id="iouValue"></span>
+                                    </div>
+                                    <input class="form-range" type="range" id="iouSlider" min="0.10" max="1.00" step="0.01" value="{{ '%.2f'|format(model_params.iou_threshold) }}">
+                                    <div class="form-hint">Controla el criterio de solapamiento usado en NMS/seguimiento.</div>
+                                </div>
+
+                                <div class="d-grid gap-2">
+                                    <button class="btn btn-success" type="button" id="btnSaveParams">
+                                        <span class="me-2 d-none" id="paramsSpinner" role="status" aria-hidden="true">
+                                            <span class="spinner-border spinner-border-sm"></span>
+                                        </span>
+                                        Guardar Parámetros de IA
+                                    </button>
+                                </div>
+
+                                <div class="alert alert-success mt-3 mb-0 d-none" id="paramsOk">Parámetros actualizados en tiempo real.</div>
+                                <div class="alert alert-danger mt-3 mb-0 d-none" id="paramsErr"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-xl-6">
+                        <div class="card">
+                            <div class="card-header">Métricas</div>
+                            <div class="card-body">
+                                <div class="form-hint">Placeholder UX: aquí puedes agregar métricas del sistema (FPS, latencia, tasa de falsos positivos) sin mezclarlo con hardware/dataset.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- =================== DATASET =================== -->
+            <div class="tab-pane fade" id="pane-dataset" role="tabpanel" aria-labelledby="tab-dataset">
+                <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-3">
+                    <div>
+                        <h4 class="fw-bold mb-1">Gestor de Dataset</h4>
+                        <div class="form-hint">Control de calidad: clasifica y corrige errores con historial y revert.</div>
+                    </div>
+                </div>
+
+                <ul class="nav nav-tabs" id="datasetTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="ds-pending-tab" data-bs-toggle="tab" data-bs-target="#ds-pending" type="button" role="tab">
+                            Pendientes de Clasificar
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="ds-history-tab" data-bs-toggle="tab" data-bs-target="#ds-history" type="button" role="tab">
+                            Ya Clasificadas (Historial)
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content pt-3">
+                    <div class="tab-pane fade show active" id="ds-pending" role="tabpanel" aria-labelledby="ds-pending-tab">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div class="form-hint">Pendientes en <code>dataset_recoleccion/**/limpias/</code>.</div>
+                            <button class="btn btn-sm btn-outline-light" type="button" id="btnRefreshDataset">
+                                <i class="fa-solid fa-arrows-rotate me-1"></i> Actualizar
+                            </button>
+                        </div>
+                        <div class="alert alert-danger d-none" id="datasetErr"></div>
+                        <div class="alert alert-success d-none" id="datasetOk"></div>
+                        <div class="row g-3" id="datasetGrid"></div>
+                    </div>
+
+                    <div class="tab-pane fade" id="ds-history" role="tabpanel" aria-labelledby="ds-history-tab">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div class="form-hint">Historial en <code>dataset_entrenamiento/</code> (negativas y positivas pendientes).</div>
+                            <button class="btn btn-sm btn-outline-light" type="button" id="btnRefreshHistory">
+                                <i class="fa-solid fa-arrows-rotate me-1"></i> Actualizar
+                            </button>
+                        </div>
+                        <div class="alert alert-danger d-none" id="historyErr"></div>
+                        <div class="alert alert-success d-none" id="historyOk"></div>
+                        <div class="row g-3" id="historyGrid"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        window.__CAMERA_CFG__ = { api_test_url: "{{ url_for('api_test_connection') }}" };
+        window.__MODEL_PARAMS_CFG__ = {
+            update_url: "{{ url_for('api_update_model_params') }}",
+            initial: {
+                confidence_threshold: {{ '%.2f'|format(model_params.confidence_threshold) }},
+                persistence_frames: {{ model_params.persistence_frames }},
+                iou_threshold: {{ '%.2f'|format(model_params.iou_threshold) }},
+            }
+        };
+        window.__DATASET_CFG__ = {
+            list_url: "{{ url_for('api_get_dataset_images') }}",
+            classify_url: "{{ url_for('api_classify_image') }}",
+            history_url: "{{ url_for('api_get_classified_images') }}",
+            revert_url: "{{ url_for('api_revert_classification') }}",
+        };
+    </script>
+    <script src="/static/admin_camera.js" defer></script>
+    <script src="/static/admin_model_params.js" defer></script>
+    <script src="/static/admin_dataset.js" defer></script>
+</body>
+</html>

@@ -37,6 +37,15 @@
         .form-label{ display:block !important; }
         .form-control, .form-select{ border:1px solid #30363d !important; background:#0f141b !important; color:#ffffff !important; }
         .form-control:focus, .form-select:focus{ box-shadow:none !important; border-color:#ffffff !important; }
+
+        @keyframes alertPulse {
+            0% { box-shadow: 0 0 0 rgba(255,68,68,.0); }
+            50% { box-shadow: 0 0 18px rgba(255,68,68,.45); }
+            100% { box-shadow: 0 0 0 rgba(255,68,68,.0); }
+        }
+        .alert-blink {
+            animation: alertPulse 1.1s ease-in-out infinite;
+        }
     </style>
 </head>
 <body>
@@ -47,7 +56,7 @@
             </a>
             <div class="ms-auto d-flex align-items-center gap-2">
                 {% if is_admin %}
-                    <a class="btn btn-sm btn-outline-warning" href="{{ url_for('admin_camera') }}">
+                    <a class="btn btn-sm btn-outline-warning" href="{{ url_for('admin_dashboard') }}">
                         <i class="fa-solid fa-screwdriver-wrench me-1"></i> Configuración de Cámara
                     </a>
                 {% endif %}
@@ -95,7 +104,7 @@
                                     <input class="form-control" type="file" id="fileInput" accept=".jpg,.jpeg,.png,.mp4,.avi,.mov" />
                                 </div>
                                 <div class="d-flex gap-2">
-                                    <button class="btn btn-success w-100" id="btnUpload">
+                                    <button class="btn btn-success w-100 d-none" id="btnUpload" type="button">
                                         <i class="fa-solid fa-bolt me-1"></i> Ejecutar detección
                                     </button>
                                     <button class="btn btn-outline-light" id="btnReset" type="button">
@@ -106,7 +115,7 @@
                                 <div class="mt-3 d-none" id="spinnerBox">
                                     <div class="d-flex align-items-center gap-2">
                                         <div class="spinner-border text-warning" role="status"></div>
-                                        <div class="text-secondary">Procesando en GPU... (cuda:0)</div>
+                                        <div class="text-secondary" id="spinnerMsg">Procesando en GPU... (cuda:0)</div>
                                     </div>
                                 </div>
 
@@ -141,6 +150,10 @@
                                         <video id="resultVideo" class="video-frame d-none" controls>
                                             <source id="resultVideoSource" type="video/mp4" />
                                         </video>
+                                        <div class="mt-3 d-none" id="topDetectionsSection">
+                                            <h6 class="mb-2">Top 10 Detecciones (Mayor Confianza)</h6>
+                                            <div class="row g-2" id="topDetectionsGrid"></div>
+                                        </div>
                                     </div>
                                     <div class="col-lg-4">
                                         <div class="card">
@@ -236,6 +249,12 @@
                                         <input class="form-check-input" type="checkbox" role="switch" id="autoTrackingToggle" />
                                     </div>
                                 </div>
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <span class="text-secondary">Modo Inspección Automática</span>
+                                    <div class="form-check form-switch m-0">
+                                        <input class="form-check-input" type="checkbox" role="switch" id="inspectionToggle" />
+                                    </div>
+                                </div>
 
                                 <div class="d-grid gap-2" style="grid-template-columns: 1fr 1fr 1fr;">
                                     <div></div>
@@ -263,6 +282,75 @@
                             </div>
                         </div>
                     </div>
+
+                    <div class="col-xl-4">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fa-solid fa-bell me-1"></i> Panel de Alertas Recientes
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-dark table-hover table-sm align-middle mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>ID</th>
+                                                <th>Hora</th>
+                                                <th>Conf.</th>
+                                                <th>BBox</th>
+                                                <th>Evidencia</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="recentAlertsBody">
+                                            <tr><td colspan="5" class="text-secondary">Sin alertas.</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="form-text text-secondary mt-2">
+                                    Se actualiza cada ~4s. Las alertas &lt;10s se resaltan.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para expandir imÃ¡genes (Top 10) -->
+    <div class="modal fade" id="imagenModal" tabindex="-1" aria-labelledby="imagenModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="imagenModalLabel">
+                        <i class="fa-solid fa-image me-2"></i>Vista ampliada
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <img id="imagenExpandida" src="" alt="Imagen expandida" class="img-fluid"
+                         style="max-width: 100%; max-height: 85vh; object-fit: contain; margin: auto; display: block;" />
+                </div>
+                <div class="modal-footer justify-content-between">
+                    <span id="confianzaTexto" class="text-secondary">Nivel de confianza: --</span>
+                    <button type="button" class="btn btn-outline-light" data-bs-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Evidencia de DetecciÃ³n (Panel de Alertas) -->
+    <div class="modal fade" id="evidenceModal" tabindex="-1" aria-labelledby="evidenceModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content bg-dark text-light border border-secondary">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="evidenceModalLabel">
+                        <i class="fa-solid fa-camera me-2"></i>Evidencia de DetecciÃ³n
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <img id="evidenceImage" src="" class="img-fluid rounded" alt="Evidencia de detecciÃ³n" />
+                    <div id="evidenceMeta" class="small text-secondary mt-2"></div>
                 </div>
             </div>
         </div>

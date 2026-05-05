@@ -5,10 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RPAS Micro | Configuración de Cámara</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
     <link rel="stylesheet" href="/static/style.css" />
     <style>
         .navbar{ background:rgba(18,24,29,.95); border-bottom:1px solid var(--bd); }
         code{ color: #00ff00; }
+        .form-hint{ font-size:.875rem; color:rgba(255,255,255,.72); }
+        .kbd-pill{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:.85rem; border:1px solid var(--bd); padding:.1rem .4rem; border-radius:.35rem; }
+        .lock-overlay{ position:absolute; inset:0; border-radius:.5rem; pointer-events:none; opacity:0; transition:opacity .15s ease; }
+        .locked .lock-overlay{ opacity:1; background:rgba(11,14,20,.25); }
+        .locked .lock-note{ display:flex !important; }
+        .lock-note{ display:none; align-items:center; gap:.5rem; color:rgba(255,255,255,.78); font-size:.9rem; }
     </style>
 </head>
 <body>
@@ -21,8 +28,21 @@
         </div>
     </nav>
 
-    <div class="container py-4" style="max-width: 980px;">
-        <h3 class="fw-bold mb-3">Configuración de Cámara (Admin)</h3>
+    <div class="container py-4" style="max-width: 1100px;">
+        <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-3">
+            <div>
+                <h3 class="fw-bold mb-1">Configuración de Cámara (Admin)</h3>
+                <div class="form-hint">
+                    Flujo recomendado: pega la <span class="kbd-pill">URL RTSP</span> → verifica credenciales → <span class="kbd-pill">Vincular y Probar</span>.
+                </div>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge text-bg-secondary d-none" id="cameraModeBadge"></span>
+                <button class="btn btn-sm btn-outline-light d-none" type="button" id="btnEdit">
+                    <i class="fa-solid fa-pen-to-square me-1"></i> Editar
+                </button>
+            </div>
+        </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
@@ -32,108 +52,139 @@
             {% endif %}
         {% endwith %}
 
-        <form class="row g-3" method="post" action="{{ url_for('admin_camera') }}" autocomplete="off">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header">Modo</div>
-                    <div class="card-body">
-                        <label class="form-label">Tipo de cámara</label>
-                        <select class="form-select" name="camera_type">
-                            <option value="fixed" {% if cfg.camera_type == 'fixed' %}selected{% endif %}>Fija</option>
-                            <option value="ptz" {% if cfg.camera_type == 'ptz' %}selected{% endif %}>PTZ</option>
-                        </select>
-                        <div class="form-text text-secondary">
-                            Esto es persistente. El modo se controla exclusivamente desde este panel.
-                        </div>
-                    </div>
-                </div>
-            </div>
+        <form class="row g-3" method="post" action="{{ url_for('admin_camera') }}" autocomplete="off" id="cameraForm">
+            <input type="hidden" name="camera_type" id="camera_type" value="{{ cfg.camera_type or 'fixed' }}" />
 
             <div class="col-lg-6">
-                <div class="card">
-                    <div class="card-header">RTSP</div>
+                <div class="card position-relative" id="rtspCard">
+                    <div class="lock-overlay"></div>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>RTSP</span>
+                        <span class="lock-note"><i class="fa-solid fa-lock"></i> Bloqueado</span>
+                    </div>
                     <div class="card-body">
-                        <label class="form-label">URL RTSP</label>
-                        <input class="form-control" name="rtsp_url" placeholder="rtsp://.../Streaming/Channels/101"
+                        <label class="form-label" for="rtsp_url">URL RTSP</label>
+                        <input class="form-control" id="rtsp_url" name="rtsp_url" placeholder="rtsp://admin:pass@192.168.1.108:554/stream"
                                value="{{ cfg.rtsp_url or '' }}" autocomplete="off" />
-                        <div class="row g-2 mt-1">
-                            <div class="col-md-6">
-                                <label class="form-label">Usuario RTSP</label>
-                                <input class="form-control" name="rtsp_username" value="{{ cfg.rtsp_username or '' }}" autocomplete="off" />
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Password RTSP</label>
-                                <input class="form-control" name="rtsp_password" type="password" value="{{ cfg.rtsp_password or '' }}" autocomplete="off" />
-                            </div>
+                        <div class="form-hint mt-2">
+                            Si pegas una URL completa, se extrae automáticamente <b>Host</b>, <b>Usuario</b> y <b>Contraseña</b>.
                         </div>
-                        <div class="form-text text-secondary">
-                            Si la URL no trae credenciales, se inyectan con usuario/password.
+
+                        <div class="row g-2 mt-2">
+                            <div class="col-md-6">
+                                <label class="form-label" for="rtsp_username">Usuario RTSP</label>
+                                <input class="form-control" id="rtsp_username" name="rtsp_username" value="{{ cfg.rtsp_username or '' }}" autocomplete="off" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label" for="rtsp_password">Contraseña RTSP</label>
+                                <div class="input-group">
+                                    <input class="form-control" id="rtsp_password" name="rtsp_password" type="password" value="{{ cfg.rtsp_password or '' }}" autocomplete="off" />
+                                    <button class="btn btn-outline-light" type="button" data-toggle-password="#rtsp_password" aria-label="Mostrar contraseña RTSP">
+                                        <i class="fa-solid fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
 
             <div class="col-lg-6">
-                <div class="card">
-                    <div class="card-header">ONVIF (PTZ)</div>
+                <div class="card position-relative" id="onvifCard">
+                    <div class="lock-overlay"></div>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>ONVIF (Autodescubrimiento PTZ)</span>
+                        <span class="lock-note"><i class="fa-solid fa-lock"></i> Bloqueado</span>
+                    </div>
                     <div class="card-body">
                         <div class="row g-2">
                             <div class="col-md-8">
-                                <label class="form-label">Host</label>
-                                <input class="form-control" name="onvif_host" placeholder="192.168.1.64"
+                                <label class="form-label" for="onvif_host">Host (IP/DNS)</label>
+                                <input class="form-control" id="onvif_host" name="onvif_host" placeholder="192.168.1.108"
                                        value="{{ cfg.onvif_host or '' }}" autocomplete="off" />
+                                <div class="form-hint mt-1">Se autocompleta desde RTSP cuando aplica.</div>
                             </div>
                             <div class="col-md-4">
-                                <label class="form-label">Puerto</label>
-                                <input class="form-control" name="onvif_port" type="number" value="{{ cfg.onvif_port or 80 }}" autocomplete="off" />
-                            </div>
-                        </div>
-                        <div class="row g-2 mt-1">
-                            <div class="col-md-6">
-                                <label class="form-label">Usuario</label>
-                                <input class="form-control" name="onvif_username" value="{{ cfg.onvif_username or '' }}" autocomplete="off" />
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Password</label>
-                                <input class="form-control" name="onvif_password" type="password" value="{{ cfg.onvif_password or '' }}" autocomplete="off" />
+                                <label class="form-label" for="onvif_port">Puerto</label>
+                                <input class="form-control" id="onvif_port" name="onvif_port" list="onvifPortList" inputmode="numeric"
+                                       value="{{ cfg.onvif_port or 80 }}" autocomplete="off" />
+                                <datalist id="onvifPortList">
+                                    <option value="80"></option>
+                                    <option value="8000"></option>
+                                    <option value="8899"></option>
+                                    <option value="5000"></option>
+                                </datalist>
                             </div>
                         </div>
 
-                        <div class="d-flex gap-2 mt-3">
-                            <button class="btn btn-success w-100" type="submit">Guardar</button>
-                            <button class="btn btn-outline-warning" type="button" id="btnTest">Probar conexión</button>
+                        <div class="form-check form-switch mt-3">
+                            <input class="form-check-input" type="checkbox" role="switch" id="sameCreds" checked />
+                            <label class="form-check-label" for="sameCreds">
+                                Usar las mismas credenciales para RTSP y ONVIF
+                            </label>
                         </div>
-                        <div class="form-text text-secondary mt-2">
-                            Requiere <code>onvif-zeep</code> instalado para el test real.
+
+                        <div class="row g-2 mt-2" id="onvifCredsRow">
+                            <div class="col-md-6">
+                                <label class="form-label" for="onvif_username">Usuario ONVIF</label>
+                                <input class="form-control" id="onvif_username" name="onvif_username" value="{{ cfg.onvif_username or '' }}" autocomplete="off" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label" for="onvif_password">Contraseña ONVIF</label>
+                                <div class="input-group">
+                                    <input class="form-control" id="onvif_password" name="onvif_password" type="password" value="{{ cfg.onvif_password or '' }}" autocomplete="off" />
+                                    <button class="btn btn-outline-light" type="button" data-toggle-password="#onvif_password" aria-label="Mostrar contraseña ONVIF">
+                                        <i class="fa-solid fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                        <div class="alert alert-dark mt-2 mb-0 d-none" id="testOut"></div>
+
+                        <hr class="border-secondary my-3" />
+
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-success" type="button" id="btnLinkTest">
+                                <span class="me-2 d-none" id="btnSpinner" role="status" aria-hidden="true">
+                                    <span class="spinner-border spinner-border-sm"></span>
+                                </span>
+                                Vincular y Probar Cámara
+                            </button>
+                            <button class="btn btn-outline-light" type="submit" id="btnSave">
+                                <i class="fa-solid fa-floppy-disk me-1"></i> Guardar configuración
+                            </button>
+                        </div>
+
+                        <div class="alert alert-danger mt-3 mb-0 d-none" id="testError"></div>
+                        <div class="alert alert-success mt-3 mb-0 d-none" id="testSuccess"></div>
+                        <div class="alert alert-warning mt-3 mb-0 d-none" id="testWarning"></div>
+                        <div class="form-hint mt-2">
+                            El test usa <code>onvif-zeep</code>. Si falla, verás un error técnico manejable (auth/timeout/host).
+                        </div>
                     </div>
                 </div>
             </div>
         </form>
+
+        <div class="mt-4 d-none" id="snapshotWrap">
+            <div class="card">
+                <div class="card-header">Snapshot de Confirmación</div>
+                <div class="card-body">
+                    <figure class="mb-0">
+                        <img id="snapshotImg" class="img-fluid rounded shadow-sm" alt="Vista previa RTSP" />
+                        <figcaption class="form-hint mt-2" id="snapshotCaption"></figcaption>
+                    </figure>
+                </div>
+            </div>
+        </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        async function testOnvif() {
-            // Test de conectividad ONVIF.
-            // Importante: no realiza movimientos; solo valida que las credenciales y el endpoint respondan.
-            const out = document.getElementById('testOut');
-            out.classList.remove('d-none');
-            out.textContent = 'Probando...';
-            try {
-                const r = await fetch('{{ url_for("admin_camera_test") }}', { method: 'POST' });
-                const d = await r.json();
-                if (!d.ok) throw new Error(d.error || 'Fallo de conexión');
-                out.classList.remove('alert-danger');
-                out.classList.add('alert-success');
-                out.textContent = `OK | ${d.elapsed_ms} ms`;
-            } catch (e) {
-                out.classList.remove('alert-success');
-                out.classList.add('alert-danger');
-                out.textContent = 'ERROR | ' + e.message;
-            }
-        }
-        document.getElementById('btnTest').addEventListener('click', testOnvif);
+        window.__CAMERA_CFG__ = {
+            initial_camera_type: "{{ cfg.camera_type or 'fixed' }}",
+            api_test_url: "{{ url_for('api_test_connection') }}",
+        };
     </script>
+    <script src="/static/admin_camera.js" defer></script>
 </body>
 </html>

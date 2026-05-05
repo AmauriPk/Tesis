@@ -80,7 +80,7 @@ El presente manifiesto describe los artefactos entregables del proyecto **â€�
 ## 4) Artefactos de IA
 
 - Pesos del modelo configurados en `config.py` (`YOLO_CONFIG["model_path"]`), tÃ­picamente `runs/detect/.../best.pt`.
-- Pesos adicionales (p.ej. `yolo26n.pt`) pueden existir en el repositorio como referencia/alternativa experimental.
+- Pesos adicionales (p.ej. `yolo26s.pt`) pueden existir en el repositorio como referencia/alternativa experimental.
 
 ## 5) Limitaciones y observaciones (prototipo)
 

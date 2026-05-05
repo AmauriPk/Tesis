@@ -40,22 +40,23 @@ def _env_float(name: str, default: float) -> float:
 # ======================== CONFIGURACIÓN RTSP ========================
 RTSP_CONFIG = {
     "enabled": True,  # Habilitar streaming RTSP
-    "url": os.environ.get("RTSP_URL", "rtsp://admin:Hitmank98@192.168.1.64:554/Streaming/Channels/101"),
-    "username": os.environ.get("RTSP_USERNAME", "admin"),
-    "password": os.environ.get("RTSP_PASSWORD", "Hitmank98"),
+    # Seguridad: evita credenciales embebidas en repo; usa variables de entorno.
+    "url": os.environ.get("RTSP_URL", "rtsp://usuario:password@CAMERA_IP:554/Streaming/Channels/101"),
+    "username": os.environ.get("RTSP_USERNAME", "usuario"),
+    "password": os.environ.get("RTSP_PASSWORD", "password"),
     "timeout": 30,  # Timeout de conexión en segundos (placeholder; OpenCV maneja reconexión)
     "buffer_size": 1,  # Tamaño de buffer (evitar latencia)
 }
 
 # ======================== CONFIGURACIÓN YOLO ========================
 YOLO_CONFIG = {
-    "model_path": os.environ.get("YOLO_MODEL_PATH", "runs/detect/train-10/weights/best.pt"),
+    "model_path": os.environ.get("YOLO_MODEL_PATH", "runs/detect/weights/best.pt"),
     "device": os.environ.get("YOLO_DEVICE", "cuda:0"),  # GPU a usar (cuda:0 para RTX 4060)
-    "confidence": _env_float("YOLO_CONFIDENCE", 0.5),  # Threshold de confianza mínimo
+    "confidence": _env_float("YOLO_CONFIDENCE", 0.8),  # Threshold de confianza mínimo
     "verbose": _env_bool("YOLO_VERBOSE", False),  # Mostrar logs YOLO detallados
     # Claves legacy (reservadas para futuras extensiones).
     "save_detections": True,
-    "min_confidence_db": 0.60,
+    "min_confidence_db": 0.80,
 }
 
 # ======================== CONFIGURACIÓN DE VIDEO ========================
