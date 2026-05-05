@@ -1,83 +1,115 @@
-"""Configuración del prototipo RPAS Micro (RTSP/YOLO/Video/Flask/Storage)."""
+"""ConfiguraciÃ³n central del proyecto (entorno, rutas, cÃ¡mara, modelo de visiÃ³n)."""
+
+from __future__ import annotations
 
 import os
 
+from src.system_core import env_bool as _env_bool
+from src.system_core import env_float as _env_float
+from src.system_core import env_int as _env_int
 
-def _env_bool(name: str, default: bool) -> bool:
-    """Lee una variable de entorno booleana con tolerancia a múltiples formatos."""
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    value = value.strip().lower()
-    if value in {"1", "true", "t", "yes", "y", "on"}:
-        return True
-    if value in {"0", "false", "f", "no", "n", "off"}:
-        return False
-    return default
-
-
-def _env_int(name: str, default: int) -> int:
-    """Lee una variable de entorno int; si falla, retorna `default`."""
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    try:
-        return int(value.strip())
-    except Exception:
-        return default
-
-
-def _env_float(name: str, default: float) -> float:
-    """Lee una variable de entorno float; si falla, retorna `default`."""
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    try:
-        return float(value.strip())
-    except Exception:
-        return default
-
-# ======================== CONFIGURACIÓN RTSP ========================
+# ======================== CONFIGURACIÃ“N RTSP ========================
 RTSP_CONFIG = {
-    "enabled": True,  # Habilitar streaming RTSP
-    # Seguridad: evita credenciales embebidas en repo; usa variables de entorno.
-    "url": os.environ.get("RTSP_URL", "rtsp://usuario:password@CAMERA_IP:554/Streaming/Channels/101"),
+    "enabled": True,
+    "url": os.environ.get("RTSP_URL", "0"),
     "username": os.environ.get("RTSP_USERNAME", "usuario"),
     "password": os.environ.get("RTSP_PASSWORD", "password"),
-    "timeout": 30,  # Timeout de conexión en segundos (placeholder; OpenCV maneja reconexión)
-    "buffer_size": 1,  # Tamaño de buffer (evitar latencia)
+    "timeout": _env_int("RTSP_TIMEOUT", 30),
+    "buffer_size": _env_int("RTSP_BUFFER_SIZE", 1),
 }
 
-# ======================== CONFIGURACIÓN YOLO ========================
+# ======================== CONFIGURACIÃ“N YOLO ========================
 YOLO_CONFIG = {
     "model_path": os.environ.get("YOLO_MODEL_PATH", "runs/detect/weights/best.pt"),
-    "device": os.environ.get("YOLO_DEVICE", "cuda:0"),  # GPU a usar (cuda:0 para RTX 4060)
-    "confidence": _env_float("YOLO_CONFIDENCE", 0.8),  # Threshold de confianza mínimo
-    "verbose": _env_bool("YOLO_VERBOSE", False),  # Mostrar logs YOLO detallados
+    "device": os.environ.get("YOLO_DEVICE", "cuda:0"),
+    "confidence": _env_float("YOLO_CONFIDENCE", 0.8),
+    "verbose": _env_bool("YOLO_VERBOSE", False),
 }
 
-# ======================== CONFIGURACIÓN DE VIDEO ========================
+# ======================== CONFIGURACIÃ“N DE VIDEO ========================
 VIDEO_CONFIG = {
-    "width": _env_int("VIDEO_WIDTH", 1280),  # Ancho de frame
-    "height": _env_int("VIDEO_HEIGHT", 720),  # Alto de frame
-    "fps": _env_int("VIDEO_FPS", 30),  # FPS objetivo
-    "jpeg_quality": _env_int("JPEG_QUALITY", 80),  # Calidad JPEG (1-100)
-    "inference_interval": _env_int("INFERENCE_INTERVAL", 1),  # Procesar cada N frames (1 = todos)
+    "width": _env_int("VIDEO_WIDTH", 1280),
+    "height": _env_int("VIDEO_HEIGHT", 720),
+    "fps": _env_int("VIDEO_FPS", 30),
+    "jpeg_quality": _env_int("JPEG_QUALITY", 80),
+    "inference_interval": _env_int("INFERENCE_INTERVAL", 1),
 }
 
-# ======================== CONFIGURACIÓN DE FLASK ========================
+# ======================== CONFIGURACIÃ“N DE FLASK ========================
 FLASK_CONFIG = {
-    "debug": _env_bool("FLASK_DEBUG", False),  # Modo debug (no recomendado en producción)
-    "host": os.environ.get("FLASK_HOST", "0.0.0.0"),  # Host (0.0.0.0 para acceso remoto)
-    "port": _env_int("FLASK_PORT", 5000),  # Puerto
-    "threaded": _env_bool("FLASK_THREADED", True),  # Soporte multi-thread
-    "max_content_length": _env_int("FLASK_MAX_CONTENT_LENGTH", 500 * 1024 * 1024),  # Máximo upload 500MB
+    "debug": _env_bool("FLASK_DEBUG", False),
+    "host": os.environ.get("FLASK_HOST", "0.0.0.0"),
+    "port": _env_int("FLASK_PORT", 5000),
+    "threaded": _env_bool("FLASK_THREADED", True),
+    "max_content_length": _env_int("FLASK_MAX_CONTENT_LENGTH", 500 * 1024 * 1024),
 }
 
-# ======================== CONFIGURACIÓN DE ALMACENAMIENTO ========================
+# ======================== CONFIGURACIÃ“N DE ALMACENAMIENTO ========================
 STORAGE_CONFIG = {
     "db_path": os.environ.get("SQLITE_DB_PATH", "detections.db"),
     "upload_folder": os.environ.get("UPLOAD_FOLDER", "uploads"),
     "detections_frames_folder": os.environ.get("DETECTIONS_FRAMES_FOLDER", "detections_frames"),
     "allowed_extensions": {"png", "jpg", "jpeg", "mp4", "avi", "mov"},
+    "dataset_recoleccion_folder": os.environ.get("DATASET_RECOLECCION_FOLDER", "dataset_recoleccion"),
 }
+
+# ======================== CONFIGURACIÃ“N DE PERSISTENCIA / TELEMETRÃA ========================
+PERSISTENCE_CONFIG = {
+    "enabled": _env_bool("METRICS_LOGGING", True),
+    "queue_max": _env_int("METRICS_QUEUE_MAX", 5000),
+    "detection_persistence_frames": _env_int("DETECTION_PERSISTENCE_FRAMES", 3),
+}
+
+# ======================== CONFIGURACIÃ“N DE PTZ / ONVIF ========================
+PTZ_CONFIG = {
+    "sweep_duration_s": _env_float("PTZ_SWEEP_DURATION_S", 14.0),
+    "sweep_speed": _env_float("PTZ_SWEEP_SPEED", 0.08),
+    "idle_s": _env_float("PTZ_IDLE_S", 10.0),
+    "tolerance_frac": _env_float("PTZ_TOLERANCE_FRAC", 0.20),
+    "max_speed": _env_float("PTZ_MAX_SPEED", 0.60),
+}
+
+# ======================== MODELO DE VISIÃ“N - PARÃMETROS ========================
+VISION_MODEL_PARAMS = {
+    "confidence_threshold": _env_float("CONFIDENCE_THRESHOLD", 0.60),
+    "iou_threshold": _env_float("IOU_THRESHOLD", 0.45),
+    "persistence_frames": max(1, _env_int("PERSISTENCE_FRAMES", 3)),
+}
+
+# ======================== RUTAS DEL PROYECTO ========================
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+DATASET_TRAINING_ROOT = os.environ.get("DATASET_TRAINING_ROOT", os.path.join(PROJECT_ROOT, "dataset_entrenamiento"))
+
+DATASET_NEGATIVE_DIR = os.path.join(DATASET_TRAINING_ROOT, "train", "images")
+DATASET_POSITIVE_PENDING_DIR = os.path.join(DATASET_TRAINING_ROOT, "pending", "images")
+DATASET_RECOLECCION_FOLDER = STORAGE_CONFIG.get("dataset_recoleccion_folder") or os.path.join(
+    PROJECT_ROOT, "dataset_recoleccion"
+)
+DATASET_LIMPIAS_INBOX_DIR = os.path.join(DATASET_RECOLECCION_FOLDER, "limpias")
+
+# Crear directorios si no existen
+for _dir in [DATASET_NEGATIVE_DIR, DATASET_POSITIVE_PENDING_DIR, DATASET_LIMPIAS_INBOX_DIR]:
+    try:
+        os.makedirs(_dir, exist_ok=True)
+    except Exception:
+        pass
+
+__all__ = [
+    "FLASK_CONFIG",
+    "PERSISTENCE_CONFIG",
+    "PROJECT_ROOT",
+    "PTZ_CONFIG",
+    "RTSP_CONFIG",
+    "STORAGE_CONFIG",
+    "VIDEO_CONFIG",
+    "VISION_MODEL_PARAMS",
+    "YOLO_CONFIG",
+    "DATASET_TRAINING_ROOT",
+    "DATASET_NEGATIVE_DIR",
+    "DATASET_POSITIVE_PENDING_DIR",
+    "DATASET_RECOLECCION_FOLDER",
+    "DATASET_LIMPIAS_INBOX_DIR",
+    "_env_bool",
+    "_env_float",
+    "_env_int",
+]

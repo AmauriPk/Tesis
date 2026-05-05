@@ -1,0 +1,56 @@
+:root{
+  --bg0:#0b0e14;
+  --bg1:#121821;
+  --bg2:#161b22;
+  --bd:#30363d;
+  --txt:#e6edf3;
+  --mut:#9aa4b2;
+  --ok:#00d4aa;
+  --warn:#ffaa00;
+  --bad:#ff4d4d;
+  --accent:#7aa2f7;
+}
+
+html, body{ background:var(--bg0); color:var(--txt); }
+*{ box-sizing:border-box; }
+
+.navbar{ background:rgba(18,24,33,.95)!important; border-bottom:1px solid var(--bd)!important; }
+.card{ background:var(--bg2)!important; border:1px solid var(--bd)!important; border-radius:.75rem!important; }
+.card-header{ background:rgba(11,14,20,.85)!important; border-bottom:1px solid var(--bd)!important; color:var(--txt)!important; }
+
+.nav-tabs .nav-link{ color:var(--mut)!important; border:1px solid transparent!important; }
+.nav-tabs .nav-link.active{
+  color:var(--txt)!important;
+  background:var(--bg2)!important;
+  border-color:var(--bd) var(--bd) var(--bg2)!important;
+}
+
+.form-control, .form-select{
+  background:#0f141b!important;
+  color:var(--txt)!important;
+  border:1px solid var(--bd)!important;
+}
+.form-control:focus, .form-select:focus{ border-color:var(--accent)!important; box-shadow:none!important; }
+
+.btn-outline-light{ border-color:var(--bd)!important; color:var(--txt)!important; }
+.btn-outline-light:hover{ background:rgba(122,162,247,.12)!important; border-color:rgba(122,162,247,.5)!important; }
+
+.video-frame{ width:100%; background:#000; border:1px solid var(--bd); border-radius:.75rem; }
+
+.mono, .mono-neon{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+.mono-neon{ color:var(--accent); }
+
+.status-pill{ font-weight:800; letter-spacing:.25px; }
+.status-pill.ok{ color:var(--ok); }
+.status-pill.bad{ color:var(--bad); }
+
+.table{ color:var(--txt); }
+.table thead th{ color:var(--mut); border-bottom:1px solid var(--bd)!important; }
+.table td, .table th{ border-color:rgba(48,54,61,.6)!important; }
+
+.badge{ border:1px solid rgba(48,54,61,.7); }
+
+.modal-content{ background:var(--bg1); color:var(--txt); border:1px solid var(--bd); }
+
