@@ -299,11 +299,15 @@ def guardar_config_camara(is_ptz: bool) -> None:
 def leer_config_camara() -> bool:
     """Lee `config_camara.json` y retorna is_ptz. Si no existe, False."""
     path = _camera_cfg_path()
+    debug = os.environ.get("DEBUG_CAMERA_CFG", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+    global _last_camera_cfg_is_ptz
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f) or {}
         value = bool(data.get("is_ptz", False))
-        print(f"[CAMERA_CFG] read {path} -> is_ptz={value}")
+        if debug or (_last_camera_cfg_is_ptz is None) or (bool(_last_camera_cfg_is_ptz) != bool(value)):
+            print(f"[CAMERA_CFG] read {path} -> is_ptz={value}")
+        _last_camera_cfg_is_ptz = bool(value)
         return value
     except FileNotFoundError:
         print(f"[CAMERA_CFG] read {path} -> MISSING (default False)")
@@ -418,6 +422,7 @@ is_ptz_capable = False
 auto_tracking_enabled = False
 inspection_mode_enabled = False
 last_confirmed_detection_at: float | None = None
+_last_camera_cfg_is_ptz: bool | None = None
 _onvif_last_probe_at: float | None = None
 _onvif_last_probe_error: str | None = None
 
@@ -610,15 +615,17 @@ class _InspectionPatrolWorker:
                 ptz_worker.enqueue_stop()
                 self._patrolling = False
                 continue
-            if not enabled or not ptz_ok or not is_camera_configured_ptz():
+            configured_ptz = bool(is_camera_configured_ptz())
+            if not enabled or not ptz_ok or not configured_ptz:
                 if self._patrolling:
                     ptz_worker.enqueue_stop()
                     self._patrolling = False
                 continue
             now = time.time()
             idle = (last_det is None) or ((now - float(last_det)) >= self._idle_s)
-            # Si hay tracking activo y no estamos en idle, el tracking manda.
-            if tracking and not idle:
+            # Regla: inspección solo si no hay tracking activo, o si no hay detección confirmada.
+            # Si hay detección confirmada, el tracking (si está activo) tiene prioridad.
+            if tracking and detected:
                 if self._patrolling:
                     ptz_worker.enqueue_stop()
                     self._patrolling = False
@@ -634,8 +641,9 @@ class _InspectionPatrolWorker:
                     self._dir = -1.0 * float(self._dir)
                     self._sweep_started_at = now
                     continue
-                x_speed = _clamp(float(self._sweep_speed) * float(self._dir), -0.25, 0.25)
-                ptz_worker.enqueue_move(x=x_speed, y=0.0, zoom=0.0, duration_s=0.45)
+                # Solo pan horizontal; velocidad baja y duración corta para evitar límites.
+                x_speed = _clamp(float(self._sweep_speed) * float(self._dir), -0.08, 0.08)
+                ptz_worker.enqueue_move(x=x_speed, y=0.0, zoom=0.0, duration_s=0.35, source="auto")
                 self._patrolling = True
             else:
                 if self._patrolling:
@@ -813,7 +821,7 @@ class PTZCommandWorker:
         """
         if not self._thread.is_alive():
             self._thread.start()
-    def enqueue_move(self, *, x: float, y: float, zoom: float = 0.0, duration_s: float = 0.15):
+    def enqueue_move(self, *, x: float, y: float, zoom: float = 0.0, duration_s: float = 0.15, source: str = "manual"):
         """
         Encola un movimiento continuo (pan/tilt/zoom) con duracion limitada.
 
@@ -851,6 +859,7 @@ class PTZCommandWorker:
                     "y": float(y_f),
                     "zoom": float(zoom),
                     "duration_s": float(duration_s),
+                    "source": str(source or "manual"),
                 }
             )
         except Exception:
@@ -937,6 +946,7 @@ class PTZCommandWorker:
             except queue.Empty:
                 continue
             cmd_type = (cmd.get("type") or "").lower()
+            cmd_source = str(cmd.get("source") or "manual").lower()
             # Rate limit (evita saturar PTZ): solo aplica a moves.
             if cmd_type == "move":
                 now = time.time()
@@ -959,6 +969,16 @@ class PTZCommandWorker:
                     self._controller.continuous_move(x=x, y=y, zoom=z, duration_s=duration_s)
             except Exception as e:
                 # NOTE: Seria ideal capturar excepciones de red/ONVIF concretas para telemetria.
+                msg = str(e) or e.__class__.__name__
+                low = msg.lower()
+                if cmd_type == "move" and cmd_source == "auto" and ("out of bounds" in low):
+                    print("[PTZ][WARN] Movimiento automático fuera de rango. Se ignora comando y se envía STOP.")
+                    try:
+                        if self._controller is not None:
+                            self._controller.stop()
+                    except Exception:
+                        pass
+                    continue
                 print(f"[PTZ][ERROR] {e}")
                 self._controller = None
 ptz_worker = PTZCommandWorker()
@@ -995,7 +1015,7 @@ live_processor = LiveVideoProcessor(
     get_camera_mode=lambda: str(camera_source_mode),
     is_tracking_enabled=lambda: bool(auto_tracking_enabled),
     is_camera_configured_ptz=is_camera_configured_ptz,
-    ptz_move=ptz_worker.enqueue_move,
+    ptz_move=lambda **kwargs: ptz_worker.enqueue_move(source="auto", **kwargs),
     ptz_stop=ptz_worker.enqueue_stop,
     state_lock=state_lock,
     detection_state=current_detection_state,

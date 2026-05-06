@@ -167,6 +167,10 @@ def ptz_centering_vector(
 
     x = float(clamp(x * float(max_speed), -float(max_speed), float(max_speed)))
     y = float(clamp(y * float(max_speed), -float(max_speed), float(max_speed)))
+    # Nota: si el eje vertical se siente invertido en tu PTZ, habilita:
+    #   PTZ_INVERT_TILT=1
+    if os.environ.get("PTZ_INVERT_TILT", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}:
+        y = -1.0 * float(y)
     return x, y
 
 
@@ -597,15 +601,16 @@ class LiveVideoProcessor:
                     if priority is not None:
                         h, w = frame.shape[:2]
                         try:
-                            tolerance_frac = float(os.environ.get("PTZ_CENTER_TOLERANCE_FRAC", "0.15"))
+                            tolerance_frac = float(os.environ.get("PTZ_CENTER_TOLERANCE_FRAC", "0.30"))
                         except Exception:
-                            tolerance_frac = 0.20
+                            tolerance_frac = 0.30
+                        tolerance_frac = float(clamp(tolerance_frac, 0.25, 0.35))
                         x, y = ptz_centering_vector(
                             int(w),
                             int(h),
                             tuple(priority["bbox"]),
                             tolerance_frac=tolerance_frac,
-                            max_speed=0.60,
+                            max_speed=0.25,
                         )
 
                         if not hasattr(self, "_last_ptz_cmd"):
@@ -616,12 +621,31 @@ class LiveVideoProcessor:
                         sy = (alpha * float(y)) + ((1.0 - alpha) * float(ly))
                         self._last_ptz_cmd = (sx, sy)
 
+                        detected_flag = True
+                        try:
+                            if self.state_lock is not None and self.detection_state is not None:
+                                with self.state_lock:
+                                    detected_flag = bool(self.detection_state.get("detected", True))
+                        except Exception:
+                            detected_flag = True
+
+                        print(
+                            "[TRACKING]",
+                            f"bbox={priority.get('bbox')} frame=({int(w)},{int(h)}) pan={sx:.3f} tilt={sy:.3f} "
+                            f"detected={bool(detected_flag)} auto_tracking={bool(self.is_tracking_enabled())}",
+                        )
+
+                        if abs(sx) < 0.03 and abs(sy) < 0.03:
+                            if self.ptz_stop is not None and (abs(lx) > 0.02 or abs(ly) > 0.02):
+                                self.ptz_stop()
+                            continue
+
                         if abs(sx) > 0.001 or abs(sy) > 0.001:
                             self.ptz_move(
-                                x=float(clamp(sx, -0.60, 0.60)),
-                                y=float(clamp(sy, -0.60, 0.60)),
+                                x=float(clamp(sx, -0.25, 0.25)),
+                                y=float(clamp(sy, -0.25, 0.25)),
                                 zoom=0.0,
-                                duration_s=0.12,
+                                duration_s=0.14,
                             )
                         else:
                             if self.ptz_stop is not None and (abs(lx) > 0.02 or abs(ly) > 0.02):
