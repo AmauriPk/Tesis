@@ -244,36 +244,28 @@ class PTZController:
             request = self._ptz.create_type("ContinuousMove")
             request.ProfileToken = self._profile.token
 
-            status = None
             try:
                 status = self._ptz.GetStatus({"ProfileToken": self._profile.token})
-            except Exception:
-                status = None
+            except Exception as e:
+                raise RuntimeError(
+                    "No se pudo obtener status.Position para construir Velocity compatible con Hikvision."
+                ) from e
 
             position = getattr(status, "Position", None) if status is not None else None
-            velocity = self._ptz.create_type("PTZSpeed")
+            if position is None:
+                raise RuntimeError("No se pudo obtener status.Position para construir Velocity compatible con Hikvision.")
 
-            # Hikvision: clonar estructura desde Position para mantener la forma esperada.
-            if position is not None:
-                if getattr(position, "PanTilt", None) is not None:
-                    velocity.PanTilt = position.PanTilt
-                if getattr(position, "Zoom", None) is not None:
-                    velocity.Zoom = position.Zoom
+            request.Velocity = position
 
-            if getattr(velocity, "PanTilt", None) is None:
-                velocity.PanTilt = self._ptz.create_type("Vector2D")
-            if getattr(velocity, "Zoom", None) is None:
-                velocity.Zoom = self._ptz.create_type("Vector1D")
+            if hasattr(request.Velocity, "PanTilt") and request.Velocity.PanTilt is not None:
+                request.Velocity.PanTilt.space = None
+                request.Velocity.PanTilt.x = float(x)
+                request.Velocity.PanTilt.y = float(y)
 
-            velocity.PanTilt.x = float(x)
-            velocity.PanTilt.y = float(y)
-            velocity.Zoom.x = float(zoom) if zoom is not None else 0.0
+            if hasattr(request.Velocity, "Zoom") and request.Velocity.Zoom is not None:
+                request.Velocity.Zoom.space = None
+                request.Velocity.Zoom.x = float(zoom) if zoom is not None else 0.0
 
-            request.Velocity = velocity
-
-            # CRÍTICO (Hikvision): anular espacios de coordenadas antes de enviar.
-            request.Velocity.PanTilt.space = None
-            request.Velocity.Zoom.space = None
             self._ptz.ContinuousMove(request)
             self._is_moving = True
 
