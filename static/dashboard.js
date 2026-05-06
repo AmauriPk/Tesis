@@ -435,18 +435,19 @@
         }
         setText("globalProgressStatus", status || "Procesando");
 
-        if (done) {
-          setBusy(false);
-          setText("globalProgressStatus", "Completado");
-          showFlash("success", "Completado");
-          if (!data.success) {
-            showFlash("danger", data.error || "Error");
-            return;
-          }
+          if (done) {
+            setBusy(false);
+            setText("globalProgressStatus", "Completado");
+            showFlash("success", "Completado");
+            if (!data.success) {
+              showFlash("danger", data.error || "Error");
+              return;
+            }
 
           const url = String(data.result_url || "");
           const typ = String(data.result_type || "");
           const btn = byId("btnDownload");
+          const dlVideo = byId("downloadResultVideo");
           const warning = data.video_output_warning ? String(data.video_output_warning) : "";
           if (warning) showFlash("warning", warning);
 
@@ -458,34 +459,67 @@
             }
             byId("resultVideo")?.classList.add("d-none");
             if (btn) btn.classList.add("d-none");
+            if (dlVideo) dlVideo.classList.add("d-none");
             setText("mDet", String(data.detections_count ?? 0));
             setText("mConf", fmtPct(data.avg_confidence ?? 0));
             setText("mFrames", "-");
             renderTopDetections([]);
           } else if (typ === "video") {
+            console.log("[VIDEO_RESULT]", data);
             const vid = byId("resultVideo");
             const src = byId("resultVideoSource");
             const playable = Boolean(data.result_video_playable ?? true);
             const vurl = String(data.result_video_url || url || "");
             const mime = String(data.result_video_mime || "video/mp4");
-            const cacheBustUrl = vurl ? `${vurl}${vurl.includes("?") ? "&" : "?"}v=${encodeURIComponent(jobId)}` : "";
+            const cacheBustUrl = vurl
+              ? `${vurl}${vurl.includes("?") ? "&" : "?"}v=${encodeURIComponent(`${jobId}-${Date.now()}`)}`
+              : "";
 
-            if (btn && vurl) {
-              btn.href = vurl;
-              btn.classList.remove("d-none");
-            } else if (btn) {
-              btn.classList.add("d-none");
-            }
+            const setDownload = (el) => {
+              if (!el) return;
+              if (vurl) {
+                el.href = vurl;
+                el.classList.remove("d-none");
+              } else {
+                el.classList.add("d-none");
+              }
+            };
+            setDownload(btn);
+            setDownload(dlVideo);
 
-            if (playable && vid && src && cacheBustUrl) {
+            if (!cacheBustUrl) {
+              vid?.classList.add("d-none");
+              showFlash("warning", "El análisis terminó, pero no se recibió URL del video procesado.");
+            } else if (playable && vid && src) {
+              // Evitar estados raros: resetear, asignar y recargar.
+              try {
+                vid.pause();
+                vid.currentTime = 0;
+              } catch {}
+
               src.type = mime || "video/mp4";
               src.src = cacheBustUrl;
+              // Algunos navegadores prefieren `video.src` además del `<source>`.
+              try {
+                vid.src = cacheBustUrl;
+              } catch {}
+
+              const onErr = () => {
+                vid.classList.add("d-none");
+                showFlash("warning", "No se pudo cargar el video procesado en el reproductor. Use Descargar.");
+              };
+              vid.onerror = onErr;
+              vid.onstalled = onErr;
+
               vid.load();
               vid.classList.remove("d-none");
+              // No forzar play (el usuario puede iniciarlo), pero ayuda a validar que carga.
+              try {
+                vid.play().catch(() => null);
+              } catch {}
             } else {
-              // No mostrar reproductor vacío si no es reproducible
               vid?.classList.add("d-none");
-              if (vurl) showFlash("warning", "El video procesado no es reproducible en el navegador. Use Descargar.");
+              showFlash("warning", "El video procesado no es reproducible en el navegador. Use Descargar.");
             }
             byId("resultImage")?.classList.add("d-none");
             setText("mDet", String(data.total_detections ?? 0));
