@@ -149,8 +149,8 @@ def ptz_centering_vector(
     """
     Tracking PTZ simple por zonas (estable):
     - Centro del bbox vs centro del frame.
-    - Deadzone fija: 12% del frame por eje.
-    - Fuera => velocidad constante (no proporcional).
+    - Deadzone configurable por `tolerance_frac` del frame por eje.
+    - Fuera => velocidad constante en magnitud `max_speed`.
     - Respeta PTZ_INVERT_PAN / PTZ_INVERT_TILT.
     """
     fw = max(1, int(frame_w))
@@ -162,32 +162,29 @@ def ptz_centering_vector(
     fx = float(fw) / 2.0
     fy = float(fh) / 2.0
 
-    deadzone_x = float(fw) * 0.12
-    deadzone_y = float(fh) * 0.12
+    tol = float(clamp(float(tolerance_frac), 0.01, 0.90))
+    deadzone_x = float(fw) * float(tol)
+    deadzone_y = float(fh) * float(tol)
+
+    spd = float(abs(float(max_speed)))
 
     pan = 0.0
     if cx < (fx - deadzone_x):
-        pan = -0.12
+        pan = -float(spd)
     elif cx > (fx + deadzone_x):
-        pan = 0.12
+        pan = float(spd)
 
     tilt = 0.0
     if cy < (fy - deadzone_y):
-        tilt = 0.12
+        tilt = float(spd)
     elif cy > (fy + deadzone_y):
-        tilt = -0.12
+        tilt = -float(spd)
 
     if os.environ.get("PTZ_INVERT_PAN", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}:
         pan = -1.0 * float(pan)
     if os.environ.get("PTZ_INVERT_TILT", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}:
         tilt = -1.0 * float(tilt)
 
-    moving = (abs(float(pan)) > 1e-6) or (abs(float(tilt)) > 1e-6)
-    print(
-        "[TRACKING_CMD]",
-        f"cx={cx:.1f} cy={cy:.1f} fx={fx:.1f} fy={fy:.1f} pan={float(pan):.3f} tilt={float(tilt):.3f} "
-        f"moving={bool(moving)}",
-    )
     return float(pan), float(tilt)
 
 
@@ -426,6 +423,10 @@ class LiveVideoProcessor:
         self._frame_count = 0
         self._detection_times: list[float] = []
         self._persistence = DetectionPersistence(int(self.get_model_params().get("persistence_frames", 3)))
+        self._last_tracking_cmd_at = 0.0
+        self._last_tracking_cmd = (0.0, 0.0)
+        self._ptz_auto_was_moving = False
+        self._last_tracking_error_log_at = 0.0
 
         self._evidence_saved_for_active_detection = False
         self._last_evidence_saved_at = 0.0
@@ -662,36 +663,65 @@ class LiveVideoProcessor:
 
             # PTZ tracking (opcional)
             try:
-                if (
+                tracking_active = (
                     str(self.get_camera_mode()) == "ptz"
                     and bool(self.is_tracking_enabled())
                     and bool(confirmed)
                     and bool(self.is_camera_configured_ptz())
                     and self.ptz_move is not None
-                ):
+                )
+                if not tracking_active:
+                    if bool(self._ptz_auto_was_moving) and self.ptz_stop is not None:
+                        self.ptz_stop()
+                        print("[TRACKING_CMD]", "stop reason=tracking_inactive")
+                    self._ptz_auto_was_moving = False
+                if tracking_active:
                     priority = select_priority_detection(detection_list)
                     if priority is not None:
                         h, w = frame.shape[:2]
                         try:
-                            tolerance_frac = float(os.environ.get("PTZ_CENTER_TOLERANCE_FRAC", "0.12"))
+                            deadzone_frac = float(os.environ.get("PTZ_TRACKING_DEADZONE_FRAC", "0.10"))
                         except Exception:
-                            tolerance_frac = 0.12
-                        tolerance_frac = float(clamp(tolerance_frac, 0.08, 0.25))
-                        x, y = ptz_centering_vector(
-                            int(w),
-                            int(h),
-                            tuple(priority["bbox"]),
-                            tolerance_frac=tolerance_frac,
-                            max_speed=0.25,
-                        )
+                            deadzone_frac = 0.10
+                        deadzone_frac = float(clamp(deadzone_frac, 0.05, 0.25))
 
-                        if not hasattr(self, "_last_ptz_cmd"):
-                            self._last_ptz_cmd = (0.0, 0.0)
-                        lx, ly = getattr(self, "_last_ptz_cmd")
-                        alpha = 0.55
-                        sx = (alpha * float(x)) + ((1.0 - alpha) * float(lx))
-                        sy = (alpha * float(y)) + ((1.0 - alpha) * float(ly))
-                        self._last_ptz_cmd = (sx, sy)
+                        try:
+                            duration_s = float(os.environ.get("PTZ_TRACKING_DURATION", "0.35"))
+                        except Exception:
+                            duration_s = 0.35
+                        duration_s = float(clamp(duration_s, 0.10, 1.00))
+
+                        try:
+                            min_speed = float(os.environ.get("PTZ_TRACKING_MIN_SPEED", "0.12"))
+                        except Exception:
+                            min_speed = 0.12
+                        min_speed = float(clamp(min_speed, 0.05, 0.30))
+
+                        try:
+                            max_speed_env = float(os.environ.get("PTZ_TRACKING_MAX_SPEED", "0.45"))
+                        except Exception:
+                            max_speed_env = 0.45
+                        max_speed_env = float(clamp(max_speed_env, 0.10, 0.70))
+
+                        try:
+                            base_speed = float(os.environ.get("PTZ_TRACKING_SPEED", "0.35"))
+                        except Exception:
+                            base_speed = 0.35
+                        base_speed = float(clamp(base_speed, 0.10, 0.70))
+                        max_speed = float(min(float(base_speed), float(max_speed_env)))
+
+                        try:
+                            command_interval = float(os.environ.get("PTZ_TRACKING_COMMAND_INTERVAL", "0.35"))
+                        except Exception:
+                            command_interval = 0.35
+                        command_interval = float(clamp(command_interval, 0.20, 1.00))
+
+                        now = time.time()
+                        if (now - float(self._last_tracking_cmd_at)) < float(command_interval):
+                            continue
+
+                        bbox = tuple(priority["bbox"])
+                        dx, dy = bbox_offset_norm(int(w), int(h), bbox)
 
                         detected_flag = False
                         try:
@@ -702,52 +732,64 @@ class LiveVideoProcessor:
                             detected_flag = False
 
                         if not detected_flag:
-                            if getattr(self, "_ptz_auto_was_moving", False) and self.ptz_stop is not None:
+                            if bool(self._ptz_auto_was_moving) and self.ptz_stop is not None:
                                 self.ptz_stop()
+                                print("[TRACKING_CMD]", "stop reason=not_detected")
                             self._ptz_auto_was_moving = False
+                            self._last_tracking_cmd_at = now
                             continue
 
-                        bbox = tuple(priority["bbox"])
-                        dx, dy = bbox_offset_norm(int(w), int(h), bbox)
-
-                        pan_raw = float(sx)
-                        tilt_raw = float(sy)
-                        pan_cmd = _apply_min_ptz_speed(pan_raw, min_speed=0.08, max_speed=0.25)
-                        tilt_cmd = _apply_min_ptz_speed(tilt_raw, min_speed=0.08, max_speed=0.25)
-
-                        cx = (float(bbox[0]) + float(bbox[2])) / 2.0
-                        cy = (float(bbox[1]) + float(bbox[3])) / 2.0
-                        fx = float(int(w)) / 2.0
-                        fy = float(int(h)) / 2.0
-
-                        print(
-                            "[TRACKING]",
-                            f"bbox={bbox} center=({cx:.1f},{cy:.1f}) frame_center=({fx:.1f},{fy:.1f}) "
-                            f"err=({dx:.3f},{dy:.3f}) pan_raw={pan_raw:.3f} tilt_raw={tilt_raw:.3f} "
-                            f"pan_cmd={pan_cmd:.3f} tilt_cmd={tilt_cmd:.3f} detected={bool(detected_flag)} "
-                            f"auto_tracking={bool(self.is_tracking_enabled())}",
+                        x, y = ptz_centering_vector(
+                            int(w),
+                            int(h),
+                            bbox,
+                            tolerance_frac=float(deadzone_frac),
+                            max_speed=float(max_speed),
                         )
+                        pan_cmd = float(x)
+                        tilt_cmd = float(y)
 
-                        if abs(pan_cmd) < 1e-6 and abs(tilt_cmd) < 1e-6:
-                            if getattr(self, "_ptz_auto_was_moving", False) and self.ptz_stop is not None:
+                        def _apply_min_max(v: float) -> float:
+                            if abs(float(v)) < 1e-6:
+                                return 0.0
+                            sign = 1.0 if float(v) > 0 else -1.0
+                            mag = float(min(max(abs(float(v)), float(min_speed)), float(max_speed)))
+                            return float(sign) * float(mag)
+
+                        pan_cmd = _apply_min_max(pan_cmd)
+                        tilt_cmd = _apply_min_max(tilt_cmd)
+
+                        if abs(float(pan_cmd)) < 1e-6 and abs(float(tilt_cmd)) < 1e-6:
+                            if bool(self._ptz_auto_was_moving) and self.ptz_stop is not None:
                                 self.ptz_stop()
+                                print("[TRACKING_CMD]", "stop reason=centered")
                             self._ptz_auto_was_moving = False
+                            self._last_tracking_cmd_at = now
                             continue
 
-                        if abs(pan_cmd) > 0.001 or abs(tilt_cmd) > 0.001:
+                        if (float(pan_cmd), float(tilt_cmd)) != tuple(self._last_tracking_cmd):
                             self.ptz_move(
-                                x=float(clamp(pan_cmd, -0.25, 0.25)),
-                                y=float(clamp(tilt_cmd, -0.25, 0.25)),
+                                x=float(clamp(pan_cmd, -float(max_speed_env), float(max_speed_env))),
+                                y=float(clamp(tilt_cmd, -float(max_speed_env), float(max_speed_env))),
                                 zoom=0.0,
-                                duration_s=0.14,
+                                duration_s=float(duration_s),
                             )
+                            self._last_tracking_cmd = (float(pan_cmd), float(tilt_cmd))
                             self._ptz_auto_was_moving = True
+                            self._last_tracking_cmd_at = now
+                            print(
+                                "[TRACKING_CMD]",
+                                f"bbox={bbox} err=({float(dx):.3f},{float(dy):.3f}) pan_cmd={float(pan_cmd):.3f} "
+                                f"tilt_cmd={float(tilt_cmd):.3f} duration={float(duration_s):.2f} interval={float(command_interval):.2f}",
+                            )
                         else:
-                            if getattr(self, "_ptz_auto_was_moving", False) and self.ptz_stop is not None:
-                                self.ptz_stop()
-                            self._ptz_auto_was_moving = False
-            except Exception:
-                pass
+                            # Mismo comando: actualizar timestamp para mantener rate limit y no saturar.
+                            self._last_tracking_cmd_at = now
+            except Exception as e:
+                now = time.time()
+                if (now - float(self._last_tracking_error_log_at)) > 2.0:
+                    print(f"[TRACKING][ERROR] {e}")
+                    self._last_tracking_error_log_at = now
 
             self._update_ui_state(confirmed=confirmed, consecutive_hits=consecutive_hits, detection_list=detection_list)
 
