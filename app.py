@@ -3739,6 +3739,7 @@ def resolve_ffmpeg_bin() -> str | None:
     if env_path:
         try:
             if os.path.exists(env_path):
+                print(f"[VIDEO_TRANSCODE] using FFMPEG_BIN={env_path}")
                 return env_path
         except Exception:
             pass
@@ -3746,6 +3747,7 @@ def resolve_ffmpeg_bin() -> str | None:
     try:
         p = shutil.which("ffmpeg")
         if p:
+            print(f"[VIDEO_TRANSCODE] using PATH ffmpeg={p}")
             return p
     except Exception:
         pass
@@ -3754,10 +3756,13 @@ def resolve_ffmpeg_bin() -> str | None:
         try:
             p = imageio_ffmpeg.get_ffmpeg_exe()  # type: ignore[attr-defined]
             if p and os.path.exists(p):
+                print(f"[VIDEO_TRANSCODE] using imageio_ffmpeg={p}")
                 return str(p)
-        except Exception:
+        except Exception as e:
+            print(f"[VIDEO_TRANSCODE][WARN] imageio_ffmpeg unavailable err={str(e) or e.__class__.__name__}")
             pass
 
+    print("[VIDEO_TRANSCODE][ERROR] ffmpeg no encontrado. Instale FFmpeg, configure FFMPEG_BIN o instale imageio-ffmpeg.")
     return None
 
 
@@ -3775,28 +3780,9 @@ def transcode_to_browser_mp4(input_path: str, output_path: str) -> tuple[bool, s
 
     ffmpeg_bin = resolve_ffmpeg_bin()
 
-    # ffmpeg-python (requiere binario ffmpeg en PATH).
-    if ffmpeg is not None:
-        for vcodec in ("libx264", "mpeg4"):
-            try:
-                (
-                    ffmpeg.input(in_path)
-                    .output(out_path, vcodec=vcodec, pix_fmt="yuv420p", movflags="+faststart", an=None)
-                    .overwrite_output()
-                    .run(quiet=True)
-                )
-                ok = bool(os.path.exists(out_path) and int(os.path.getsize(out_path) or 0) > 0)
-                print(f"[VIDEO_TRANSCODE] success={bool(ok)} codec={vcodec}")
-                return bool(ok), (None if ok else "transcode_failed")
-            except Exception as e:
-                print(f"[VIDEO_TRANSCODE][WARN] codec={vcodec} failed err={str(e) or e.__class__.__name__}")
-                continue
-
     if not ffmpeg_bin:
-        print("[VIDEO_TRANSCODE][ERROR] ffmpeg no encontrado. Instale FFmpeg o configure FFMPEG_BIN.")
         print("[VIDEO_TRANSCODE] success=False reason=ffmpeg_missing")
         return False, "ffmpeg_missing"
-    print(f"[VIDEO_TRANSCODE] ffmpeg_bin={ffmpeg_bin}")
 
     for vcodec in ("libx264", "mpeg4"):
         try:
@@ -3805,7 +3791,7 @@ def transcode_to_browser_mp4(input_path: str, output_path: str) -> tuple[bool, s
                 "-y",
                 "-i",
                 in_path,
-                "-c:v",
+                "-vcodec",
                 vcodec,
                 "-pix_fmt",
                 "yuv420p",
@@ -3816,7 +3802,7 @@ def transcode_to_browser_mp4(input_path: str, output_path: str) -> tuple[bool, s
             ]
             subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             ok = bool(os.path.exists(out_path) and int(os.path.getsize(out_path) or 0) > 0)
-            print(f"[VIDEO_TRANSCODE] success={bool(ok)} codec={vcodec}")
+            print(f"[VIDEO_TRANSCODE] success={bool(ok)} codec={vcodec} output={out_path}")
             return bool(ok), (None if ok else "transcode_failed")
         except Exception as e:
             print(f"[VIDEO_TRANSCODE][WARN] codec={vcodec} failed err={str(e) or e.__class__.__name__}")

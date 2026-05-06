@@ -18,6 +18,25 @@ winget install Gyan.FFmpeg
 Si no quieres instalar FFmpeg globalmente (PATH), el proyecto incluye `imageio-ffmpeg` como fallback.
 Esta librería puede descargar/proveer un `ffmpeg` embebido y el backend lo intentará usar automáticamente.
 
+Instalar en tu entorno virtual:
+
+```bat
+pip install imageio-ffmpeg
+```
+
+Probar qué ruta resolvió:
+
+```bat
+py -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
+```
+
+Usar esa ruta explícitamente con `FFMPEG_BIN` (PowerShell):
+
+```powershell
+$env:FFMPEG_BIN = (py -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())")
+py app.py
+```
+
 ## Verificar instalación
 
 ```bat
