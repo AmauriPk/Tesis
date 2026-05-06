@@ -634,8 +634,8 @@ class _InspectionPatrolWorker:
                 self._last_sent = None
                 print(
                     "[INSPECTION_CMD]",
-                    f"enabled={bool(enabled)} direction={'right' if self._dir > 0 else 'left'} x={abs(float(x_speed)):.2f} "
-                    f"paused={bool(paused_by_detection)}",
+                    f"enabled={bool(enabled)} ready={bool(ptz_ok)} direction={'right' if self._dir > 0 else 'left'} "
+                    f"x={abs(float(x_speed)):.2f} paused={bool(paused_by_detection)}",
                 )
                 continue
 
@@ -677,8 +677,8 @@ class _InspectionPatrolWorker:
             self._last_sent = (str(sig[0]), float(sig[1]))
             print(
                 "[INSPECTION_CMD]",
-                f"enabled={bool(enabled)} direction={'right' if self._dir > 0 else 'left'} x={abs(float(x_speed)):.2f} "
-                f"paused={bool(paused_by_detection)}",
+                f"enabled={bool(enabled)} ready={bool(ptz_ok)} direction={'right' if self._dir > 0 else 'left'} "
+                f"x={abs(float(x_speed)):.2f} paused={bool(paused_by_detection)}",
             )
 inspection_worker = _InspectionPatrolWorker(idle_s=10.0)
 inspection_worker.start()
@@ -705,10 +705,11 @@ def _set_ptz_capable(value: bool, *, error: str | None = None) -> None:
     with state_lock:
         is_ptz_capable = bool(value)
         _onvif_last_probe_error = error
-        if not is_ptz_capable:
+        configured_ptz = bool(is_camera_configured_ptz())
+        if (not is_ptz_capable) and (not configured_ptz):
             auto_tracking_enabled = False
             inspection_mode_enabled = False
-        camera_source_mode = "ptz" if is_ptz_capable else "fixed"
+        camera_source_mode = "ptz" if (is_ptz_capable or configured_ptz) else "fixed"
         current_detection_state["camera_source_mode"] = camera_source_mode
 
 def _probe_onvif_ptz_capability() -> bool:
@@ -2125,7 +2126,9 @@ def is_ptz_ready_for_manual() -> bool:
 def is_ptz_ready_for_automation() -> bool:
     configured_ptz = bool(is_camera_configured_ptz())
     discovered = bool(_ptz_discovered_capable())
-    return bool(configured_ptz and discovered)
+    ready = bool(configured_ptz or discovered)
+    print("[PTZ_READY]", f"automation={bool(ready)} configured={bool(configured_ptz)} discovered={bool(discovered)}")
+    return bool(ready)
 
 @app.post("/ptz_move")
 @login_required

@@ -64,14 +64,24 @@
       col.querySelectorAll("button[data-action]").forEach((b) => {
         b.addEventListener("click", async () => {
           clearAlerts();
+          const prevTxt = b.textContent;
+          b.disabled = true;
+          b.textContent = "Procesando...";
           try {
             await fetchJson("/api/classify_image", {
               method: "POST",
               body: JSON.stringify({ id: relId, label: b.dataset.action }),
             });
             setAlert("datasetOk", "Actualizado.");
+            col.remove();
+            if (!grid.querySelector(".col-6, .col-md-4, .col-lg-3")) {
+              grid.innerHTML = `<div class="text-secondary">Sin elementos.</div>`;
+            }
+            console.log("[DATASET] imagen clasificada y retirada de la vista");
           } catch (e) {
             setAlert("datasetErr", e?.data?.message || e?.data?.error || "Error");
+            b.disabled = false;
+            b.textContent = prevTxt;
           }
         });
       });
