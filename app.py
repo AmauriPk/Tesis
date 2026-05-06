@@ -3692,26 +3692,16 @@ def _process_image_and_persist(job_id: str, path: str):
         },
     )
 
-def _open_writer_h264(path: str, fps: float, width: int, height: int):
-    """Intenta abrir un `cv2.VideoWriter` H.264; retorna (writer|None, codec_usado)."""
-    # Intentar H.264 directo si la build de OpenCV/FFmpeg lo soporta.
-    for fourcc_name in ("avc1", "H264"):
-        try:
-            fourcc = cv2.VideoWriter_fourcc(*fourcc_name)
-            out = cv2.VideoWriter(path, fourcc, float(fps), (width, height))
-            if out.isOpened():
-                return out, fourcc_name
-        except Exception:
-            pass
-    return None, None
-
-
 def create_video_writer(output_path: str, fps: float, width: int, height: int):
-    codecs = [
+    candidates = [
         ("mp4v", output_path),
         ("XVID", output_path.replace(".mp4", ".avi")),
+        ("MJPG", output_path.replace(".mp4", ".avi")),
     ]
-    for codec, path in codecs:
+
+    tried = []
+    for codec, path in candidates:
+        tried.append(codec)
         try:
             fourcc = cv2.VideoWriter_fourcc(*codec)
             out = cv2.VideoWriter(path, fourcc, float(fps), (int(width), int(height)))
@@ -3723,44 +3713,14 @@ def create_video_writer(output_path: str, fps: float, width: int, height: int):
                 out.release()
             except Exception:
                 pass
-        except Exception:
-            pass
+            if codec != candidates[-1][0]:
+                print("[VIDEO_WRITER][WARN]", f"{codec} falló, intentando siguiente codec")
+        except Exception as e:
+            if codec != candidates[-1][0]:
+                print("[VIDEO_WRITER][WARN]", f"{codec} falló ({str(e) or e.__class__.__name__}), intentando siguiente codec")
+            continue
     print("[VIDEO_WRITER][ERROR] no se pudo inicializar ningún codec")
     return None, None, None
-
-def _ffmpeg_transcode_h264(src_path: str, dst_path: str):
-    """Transcodifica a H.264 con ffmpeg (python-ffmpeg o binario), si está disponible."""
-    # Preferir ffmpeg-python si está disponible (requiere binario ffmpeg en PATH).
-    if ffmpeg is not None:
-        try:
-            (
-                ffmpeg.input(src_path)
-                .output(dst_path, vcodec="libx264", pix_fmt="yuv420p", movflags="+faststart")
-                .overwrite_output()
-                .run(quiet=True)
-            )
-            return True
-        except Exception:
-            pass
-
-    ffmpeg_bin = shutil.which("ffmpeg")
-    if not ffmpeg_bin:
-        return False
-    cmd = [
-        ffmpeg_bin,
-        "-y",
-        "-i",
-        src_path,
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-        "-movflags",
-        "+faststart",
-        dst_path,
-    ]
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return True
 
 def _persist_top_detections_images(clean_dir: str, bb_dir: str, top_items: list[tuple[float, int, bytes, bytes]]) -> list[dict]:
     """Guarda Top 10 en limpio + con bounding box y devuelve al frontend SOLO las imÃ¡genes con bounding box.
@@ -3803,14 +3763,8 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
 
     out_name = f"result_{job_id}.mp4"
     out_path = os.path.join(app.config["RESULTS_FOLDER"], out_name)
-    tmp_path = os.path.join(app.config["RESULTS_FOLDER"], f"tmp_{job_id}.mp4")
-
-    out, used = _open_writer_h264(out_path, fps, width, height)
-    wrote_to = out_path
+    out, wrote_to, used = create_video_writer(out_path, fps, width, height)
     video_output_warning = None
-    if out is None:
-        print("[VIDEO_WRITER][WARN] H264 no disponible, usando fallback")
-        out, wrote_to, used = create_video_writer(tmp_path, fps, width, height)
     if out is None:
         video_output_warning = "No se pudo inicializar VideoWriter; se omitió el video de salida."
 
@@ -3891,17 +3845,7 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
         except Exception:
             pass
 
-    # Si no se pudo escribir H.264 directo, transcodificar a libx264 si existe ffmpeg.
-    if out is not None and used not in {"avc1", "H264"} and wrote_to != out_path:
-        try:
-            ok = _ffmpeg_transcode_h264(wrote_to, out_path)
-            if not ok:
-                shutil.copyfile(wrote_to, out_path)
-        finally:
-            try:
-                os.remove(wrote_to)
-            except Exception:
-                pass
+    # Nota: evitamos H.264/OpenH264 en Windows (solo codecs compatibles tipo mp4v/XVID/MJPG).
 
     avg_conf = (total_conf / max(1, frame_count)) if frame_count else 0.0
     top_items = sorted(top_heap, key=lambda x: x[0], reverse=True)
@@ -3924,7 +3868,11 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
         {
             "success": True,
             "result_type": "video",
-            "result_url": (f"/static/results/{out_name}" if out is not None else None),
+            "result_url": (
+                ("/" + os.path.relpath(wrote_to, app.root_path).replace("\\", "/"))
+                if out is not None and wrote_to
+                else None
+            ),
             "video_output_warning": video_output_warning,
             "top_detections": top_detections,
             "frames_processed": frame_count,
