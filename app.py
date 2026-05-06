@@ -687,7 +687,7 @@ class _InspectionPatrolWorker:
                 pause = float(_env_float("PTZ_INSPECTION_PAUSE", 0.7))
                 if mode == "sweep":
                     speed = _clamp(abs(float(speed)), 0.05, 1.00)
-                    duration = _clamp(float(duration), 1.0, 20.0)
+                    duration = _clamp(float(duration), 1.0, 30.0)
                     pause = _clamp(float(pause), 0.2, 5.0)
                 else:
                     speed = _clamp(abs(float(speed)), 0.05, 0.80)
@@ -715,13 +715,22 @@ class _InspectionPatrolWorker:
 
                 phase = str(self._phase)
                 if phase == "move":
+                    continuous_360 = (os.environ.get("PTZ_INSPECTION_CONTINUOUS_360") or "1").strip().lower() in {
+                        "1",
+                        "true",
+                        "t",
+                        "yes",
+                        "y",
+                        "on",
+                    }
+                    mode_txt = "continuous_360" if continuous_360 else "sweep"
                     ptz_worker.enqueue_move(x=float(x_speed), y=0.0, zoom=0.0, duration_s=float(duration), source="inspection")
                     self._patrolling = True
                     self._phase = "wait_stop"
                     self._next_action_at = now + float(duration)
                     print(
                         "[INSPECTION_CMD]",
-                        f"phase=move direction={'right' if self._dir > 0 else 'left'} x={float(x_speed):.2f} duration={float(duration):.1f}",
+                        f"phase=move mode={mode_txt} direction={'right' if self._dir > 0 else 'left'} x={float(x_speed):.2f} duration={float(duration):.1f}",
                     )
                 elif phase == "wait_stop":
                     ptz_worker.enqueue_stop()
@@ -730,7 +739,16 @@ class _InspectionPatrolWorker:
                     self._next_action_at = now + float(pause)
                     print("[INSPECTION_CMD]", "phase=stop")
                 else:  # wait_pause
-                    self._dir = -1.0 * float(self._dir)
+                    continuous_360 = (os.environ.get("PTZ_INSPECTION_CONTINUOUS_360") or "1").strip().lower() in {
+                        "1",
+                        "true",
+                        "t",
+                        "yes",
+                        "y",
+                        "on",
+                    }
+                    if not continuous_360:
+                        self._dir = -1.0 * float(self._dir)
                     self._phase = "move"
                     self._next_action_at = 0.0
                     print(
@@ -797,17 +815,10 @@ class _TrackingPTZWorker:
                     continue
 
                 try:
-                    speed = float(os.environ.get("PTZ_TRACKING_SPEED", "0.35"))
-                except Exception:
-                    speed = 0.35
-                speed = float(_clamp(speed, 0.05, 0.70))
-
-                try:
                     max_speed = float(os.environ.get("PTZ_TRACKING_MAX_SPEED", "0.50"))
                 except Exception:
                     max_speed = 0.50
                 max_speed = float(_clamp(max_speed, 0.10, 0.70))
-                speed = float(min(float(speed), float(max_speed)))
 
                 try:
                     min_speed = float(os.environ.get("PTZ_TRACKING_MIN_SPEED", "0.12"))
@@ -816,16 +827,50 @@ class _TrackingPTZWorker:
                 min_speed = float(_clamp(min_speed, 0.05, 0.30))
 
                 try:
-                    duration_s = float(os.environ.get("PTZ_TRACKING_DURATION", "0.30"))
+                    pan_duration = float(os.environ.get("PTZ_TRACKING_PAN_DURATION", os.environ.get("PTZ_TRACKING_DURATION", "0.30")))
                 except Exception:
-                    duration_s = 0.30
-                duration_s = float(_clamp(duration_s, 0.10, 0.80))
+                    pan_duration = 0.30
+                pan_duration = float(_clamp(pan_duration, 0.10, 1.00))
+
+                try:
+                    tilt_duration = float(os.environ.get("PTZ_TRACKING_TILT_DURATION", os.environ.get("PTZ_TRACKING_DURATION", "0.55")))
+                except Exception:
+                    tilt_duration = 0.55
+                tilt_duration = float(_clamp(tilt_duration, 0.10, 1.50))
+
+                try:
+                    pan_speed = float(os.environ.get("PTZ_TRACKING_PAN_SPEED", os.environ.get("PTZ_TRACKING_SPEED", "0.35")))
+                except Exception:
+                    pan_speed = 0.35
+                pan_speed = float(_clamp(pan_speed, 0.05, 0.80))
+
+                try:
+                    tilt_speed = float(os.environ.get("PTZ_TRACKING_TILT_SPEED", os.environ.get("PTZ_TRACKING_SPEED", "0.60")))
+                except Exception:
+                    tilt_speed = 0.60
+                tilt_speed = float(_clamp(tilt_speed, 0.05, 1.00))
+
+                # Respetar max_speed global como límite de seguridad.
+                pan_speed = float(min(float(pan_speed), float(max_speed)))
+                tilt_speed = float(min(float(tilt_speed), 1.0))
 
                 try:
                     deadzone_frac = float(os.environ.get("PTZ_TRACKING_DEADZONE_FRAC", "0.10"))
                 except Exception:
                     deadzone_frac = 0.10
                 deadzone_frac = float(_clamp(deadzone_frac, 0.05, 0.25))
+
+                try:
+                    edge_margin_frac = float(os.environ.get("PTZ_TRACKING_EDGE_MARGIN_FRAC", "0.08"))
+                except Exception:
+                    edge_margin_frac = 0.08
+                edge_margin_frac = float(_clamp(edge_margin_frac, 0.02, 0.20))
+
+                try:
+                    edge_tilt_boost = float(os.environ.get("PTZ_TRACKING_EDGE_TILT_BOOST", "1.25"))
+                except Exception:
+                    edge_tilt_boost = 1.25
+                edge_tilt_boost = float(_clamp(edge_tilt_boost, 1.0, 2.0))
 
                 bbox = tuple(snap.get("bbox"))
                 fw = int(snap.get("frame_w") or 0)
@@ -841,17 +886,39 @@ class _TrackingPTZWorker:
                 deadzone_x = float(fw) * float(deadzone_frac)
                 deadzone_y = float(fh) * float(deadzone_frac)
 
+                top_edge = float(y1) <= (float(fh) * float(edge_margin_frac))
+                bottom_edge = float(y2) >= (float(fh) * (1.0 - float(edge_margin_frac)))
+                edge_boost_applied = False
+                reason = "deadzone"
+
                 pan = 0.0
                 if cx < (fx - deadzone_x):
-                    pan = -float(speed)
+                    pan = -float(pan_speed)
+                    reason = "left"
                 elif cx > (fx + deadzone_x):
-                    pan = float(speed)
+                    pan = float(pan_speed)
+                    reason = "right"
 
                 tilt = 0.0
-                if cy < (fy - deadzone_y):
-                    tilt = float(speed)
-                elif cy > (fy + deadzone_y):
-                    tilt = -float(speed)
+                if top_edge:
+                    tilt = float(tilt_speed) * float(edge_tilt_boost)
+                    edge_boost_applied = True
+                    reason = "top_edge"
+                elif bottom_edge:
+                    tilt = -float(tilt_speed) * float(edge_tilt_boost)
+                    edge_boost_applied = True
+                    reason = "bottom_edge"
+                else:
+                    if cy < (fy - deadzone_y):
+                        tilt = float(tilt_speed)
+                        reason = "up"
+                    elif cy > (fy + deadzone_y):
+                        tilt = -float(tilt_speed)
+                        reason = "down"
+
+                # Límite superior para tilt (algunas cámaras aceptan 1.0).
+                if abs(float(tilt)) > 1.0:
+                    tilt = 1.0 if float(tilt) > 0 else -1.0
 
                 if os.environ.get("PTZ_INVERT_PAN", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}:
                     pan = -1.0 * float(pan)
@@ -869,6 +936,10 @@ class _TrackingPTZWorker:
                 tilt = _apply_min(float(tilt))
 
                 if abs(float(pan)) < 1e-6 and abs(float(tilt)) < 1e-6:
+                    # Si está pegado al borde superior/inferior, no considerarlo "centered".
+                    if top_edge or bottom_edge:
+                        self._last_cmd_at = now
+                        continue
                     if self._was_moving:
                         ptz_worker.enqueue_stop()
                         self._was_moving = False
@@ -881,11 +952,23 @@ class _TrackingPTZWorker:
                     self._last_cmd_at = now
                     continue
 
+                # Duración: más larga si hay tilt.
+                duration_s = float(pan_duration)
+                if abs(float(tilt)) > 1e-6 and abs(float(pan)) <= 1e-6:
+                    duration_s = float(tilt_duration)
+                elif abs(float(tilt)) > 1e-6 and abs(float(pan)) > 1e-6:
+                    duration_s = float(max(float(pan_duration), float(tilt_duration)))
+
                 ptz_worker.enqueue_move(x=float(pan), y=float(tilt), zoom=0.0, duration_s=float(duration_s), source="tracking")
                 self._last_cmd = cmd
                 self._last_cmd_at = now
                 self._was_moving = True
-                print("[TRACKING_WORKER]", f"move pan={float(pan):.3f} tilt={float(tilt):.3f} age={float(age):.2f} duration={float(duration_s):.2f}")
+                print(
+                    "[TRACKING_WORKER]",
+                    f"move pan={float(pan):.3f} tilt={float(tilt):.3f} pan_speed={float(pan_speed):.2f} "
+                    f"tilt_speed={float(tilt_speed):.2f} duration={float(duration_s):.2f} edge_boost={bool(edge_boost_applied)} "
+                    f"reason={reason} age={float(age):.2f}",
+                )
             except Exception as e:
                 now = time.time()
                 if (now - float(self._last_error_log_at)) > 2.0:
