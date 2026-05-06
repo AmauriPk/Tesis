@@ -580,6 +580,7 @@ class _InspectionPatrolWorker:
         self._next_action_at = 0.0
         self._phase = "move"  # move -> stop_wait -> move...
         self._stop_sent_in_pause = False
+        self._last_sent: tuple[str, float] | None = None  # (phase, dir)
     def start(self):
         """
         Inicia el hilo de patrullaje (idempotente).
@@ -602,15 +603,14 @@ class _InspectionPatrolWorker:
         """
         global inspection_mode_enabled
         while not self._stop.is_set():
-            time.sleep(0.05)
+            time.sleep(0.25)
             with state_lock:
                 enabled = bool(inspection_mode_enabled)
                 tracking = bool(auto_tracking_enabled)
                 detected = bool(current_detection_state.get("detected"))
             ptz_ok = bool(is_ptz_ready_for_automation())
-            configured_ptz = bool(is_camera_configured_ptz())
             paused_by_detection = bool(tracking and detected)
-            if not enabled or not ptz_ok or not configured_ptz:
+            if not enabled or not ptz_ok:
                 if self._patrolling:
                     ptz_worker.enqueue_stop()
                     self._patrolling = False
@@ -618,6 +618,7 @@ class _InspectionPatrolWorker:
                 self._phase = "move"
                 self._next_action_at = 0.0
                 self._stop_sent_in_pause = False
+                self._last_sent = None
                 continue
             now = time.time()
             x_speed = float(0.08) * float(self._dir)
@@ -630,10 +631,11 @@ class _InspectionPatrolWorker:
                 self._segment_started_at = None
                 self._phase = "move"
                 self._next_action_at = 0.0
+                self._last_sent = None
                 print(
                     "[INSPECTION_CMD]",
-                    f"enabled={enabled} direction={'right' if self._dir > 0 else 'left'} x_speed={x_speed:.3f} "
-                    f"paused_by_detection={bool(paused_by_detection)}",
+                    f"enabled={bool(enabled)} direction={'right' if self._dir > 0 else 'left'} x={abs(float(x_speed)):.2f} "
+                    f"paused={bool(paused_by_detection)}",
                 )
                 continue
 
@@ -643,6 +645,7 @@ class _InspectionPatrolWorker:
                 self._segment_started_at = now
                 self._phase = "move"
                 self._next_action_at = 0.0
+                self._last_sent = None
 
             # Cambiar direcciÃ³n cada 8 segundos.
             if (now - float(self._segment_started_at)) >= 8.0:
@@ -652,6 +655,11 @@ class _InspectionPatrolWorker:
             x_speed = float(0.08) * float(self._dir)
 
             if float(self._next_action_at) > 0.0 and now < float(self._next_action_at):
+                continue
+
+            last = self._last_sent
+            sig = (str(self._phase), float(self._dir))
+            if last is not None and (last[0], last[1]) == sig:
                 continue
 
             if str(self._phase) == "move":
@@ -666,10 +674,11 @@ class _InspectionPatrolWorker:
                 self._phase = "move"
                 self._next_action_at = now + 0.50
 
+            self._last_sent = (str(sig[0]), float(sig[1]))
             print(
                 "[INSPECTION_CMD]",
-                f"enabled={enabled} direction={'right' if self._dir > 0 else 'left'} x_speed={x_speed:.3f} "
-                f"paused_by_detection={bool(paused_by_detection)}",
+                f"enabled={bool(enabled)} direction={'right' if self._dir > 0 else 'left'} x={abs(float(x_speed)):.2f} "
+                f"paused={bool(paused_by_detection)}",
             )
 inspection_worker = _InspectionPatrolWorker(idle_s=10.0)
 inspection_worker.start()
