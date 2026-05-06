@@ -605,9 +605,9 @@ class _InspectionPatrolWorker:
             time.sleep(0.05)
             with state_lock:
                 enabled = bool(inspection_mode_enabled)
-                ptz_ok = bool(is_ptz_capable)
                 tracking = bool(auto_tracking_enabled)
                 detected = bool(current_detection_state.get("detected"))
+            ptz_ok = bool(is_ptz_ready_for_automation())
             configured_ptz = bool(is_camera_configured_ptz())
             paused_by_detection = bool(tracking and detected)
             if not enabled or not ptz_ok or not configured_ptz:
@@ -1041,7 +1041,7 @@ live_processor = LiveVideoProcessor(
     metrics_enqueue=_metrics_writer.enqueue,
     make_frame_record=FrameRecord,
     get_camera_mode=lambda: str(camera_source_mode),
-    is_tracking_enabled=lambda: bool(auto_tracking_enabled),
+    is_tracking_enabled=lambda: bool(auto_tracking_enabled) and bool(is_ptz_ready_for_automation()),
     is_camera_configured_ptz=is_camera_configured_ptz,
     ptz_move=_ptz_tracking_move,
     ptz_stop=ptz_worker.enqueue_stop,
@@ -2023,9 +2023,15 @@ def api_auto_tracking():
         enabled_txt = (request.form.get("enabled") or "").strip().lower()
         enabled = enabled_txt in {"1", "true", "t", "yes", "y", "on"}
 
+    ptz_capable = bool(_ptz_discovered_capable())
+    configured_ptz = bool(is_camera_configured_ptz())
+    ready_auto = bool(is_ptz_ready_for_automation())
+    print(
+        "[PTZ_READY]",
+        f"automation={bool(ready_auto)} configured={bool(configured_ptz)} discovered={bool(ptz_capable)}",
+    )
     with state_lock:
-        # Seguridad: no habilitar tracking si el hardware no es PTZ.
-        auto_tracking_enabled = bool(enabled) and bool(is_ptz_capable)
+        auto_tracking_enabled = bool(enabled) and bool(ready_auto)
         disabled = not bool(enabled)
     if disabled:
         ptz_worker.enqueue_stop()
@@ -2046,9 +2052,16 @@ def api_inspection_mode():
     payload = request.get_json(silent=True) or {}
     enabled = bool(payload.get("enabled"))
 
+    ptz_capable = bool(_ptz_discovered_capable())
+    configured_ptz = bool(is_camera_configured_ptz())
+    ready_auto = bool(is_ptz_ready_for_automation())
+    print(
+        "[PTZ_READY]",
+        f"automation={bool(ready_auto)} configured={bool(configured_ptz)} discovered={bool(ptz_capable)}",
+    )
     with state_lock:
         if enabled:
-            inspection_mode_enabled = bool(enabled) and bool(is_ptz_capable) and bool(leer_config_camara())
+            inspection_mode_enabled = bool(enabled) and bool(ready_auto)
             # Al habilitar inspección, garantizar que el tracking esté listo para intervenir.
             # (Desacoplado) No tocar auto_tracking aquÃ­.
         else:
@@ -2071,8 +2084,19 @@ def _require_ptz_capable() -> None:
         abort(403)
 
 
+def _ptz_discovered_capable() -> bool:
+    with state_lock:
+        return bool(is_ptz_capable)
+
+
 def is_ptz_ready_for_manual() -> bool:
-    return bool(is_camera_configured_ptz() or is_ptz_capable)
+    return bool(is_camera_configured_ptz() or _ptz_discovered_capable())
+
+
+def is_ptz_ready_for_automation() -> bool:
+    configured_ptz = bool(is_camera_configured_ptz())
+    discovered = bool(_ptz_discovered_capable())
+    return bool(configured_ptz and discovered)
 
 @app.post("/ptz_move")
 @login_required
@@ -2080,11 +2104,11 @@ def is_ptz_ready_for_manual() -> bool:
 def ptz_move():
     """Movimiento PTZ (joystick) o vector libre; bloqueado si la cámara no es PTZ."""
     configured_ptz = bool(is_camera_configured_ptz())
-    ptz_capable = bool(is_ptz_capable)
+    ptz_capable = bool(_ptz_discovered_capable())
     ready = bool(is_ptz_ready_for_manual())
     print(
-        "[PTZ_MANUAL_READY]",
-        {"configured_ptz": configured_ptz, "is_ptz_capable": ptz_capable, "ready": ready},
+        "[PTZ_READY]",
+        f"manual={bool(ready)} configured={bool(configured_ptz)} discovered={bool(ptz_capable)}",
     )
     if not ready:
         return (
@@ -2132,11 +2156,11 @@ def ptz_move():
 def ptz_stop():
     """Stop PTZ; bloqueado si la cámara no es PTZ."""
     configured_ptz = bool(is_camera_configured_ptz())
-    ptz_capable = bool(is_ptz_capable)
+    ptz_capable = bool(_ptz_discovered_capable())
     ready = bool(is_ptz_ready_for_manual())
     print(
-        "[PTZ_MANUAL_READY]",
-        {"configured_ptz": configured_ptz, "is_ptz_capable": ptz_capable, "ready": ready},
+        "[PTZ_READY]",
+        f"manual={bool(ready)} configured={bool(configured_ptz)} discovered={bool(ptz_capable)}",
     )
     if not ready:
         return (
