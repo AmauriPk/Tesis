@@ -187,14 +187,14 @@
 
     const autoToggle = byId("autoTrackingToggle");
     if (autoToggle) {
-      let autoRequestInFlight = false;
+      let autoTrackingRequestInFlight = false;
       autoToggle.addEventListener("change", async () => {
-        if (autoRequestInFlight) return;
-        autoRequestInFlight = true;
+        if (autoTrackingRequestInFlight) return;
+        autoTrackingRequestInFlight = true;
         try {
           await postJson("/api/auto_tracking", { enabled: autoToggle.checked });
         } finally {
-          autoRequestInFlight = false;
+          autoTrackingRequestInFlight = false;
         }
       });
       fetchJson("/api/auto_tracking")

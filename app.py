@@ -65,6 +65,7 @@ except Exception:  # pragma: no cover
 from config import FLASK_CONFIG, ONVIF_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG, _env_float, _env_int
 from src.system_core import CameraConfig, FrameRecord, MetricsDBWriter, PTZController, User, db
 from src.video_processor import LiveStreamDeps, LiveVideoProcessor, RTSPLatestFrameReader
+import src.video_processor as video_processor_module
 from src.system_core import clamp, select_priority_detection
 
 # ======================== APP / DB ========================
@@ -448,7 +449,10 @@ def _bbox_offset_norm(frame_w: int, frame_h: int, bbox_xyxy) -> tuple[float, flo
             - dx > 0: bbox a la derecha
             - dy > 0: bbox abajo (convención de imagen)
     """
-    x1, y1, x2, y2 = bbox_xyxy
+    try:
+        x1, y1, x2, y2 = bbox_xyxy
+    except Exception:
+        return 0.0, 0.0
     cx = (x1 + x2) / 2.0
     cy = (y1 + y2) / 2.0
     center_x = frame_w / 2.0
@@ -457,6 +461,67 @@ def _bbox_offset_norm(frame_w: int, frame_h: int, bbox_xyxy) -> tuple[float, flo
     dx = (cx - center_x) / max(1.0, (frame_w / 2.0))  # -1..1
     dy = (cy - center_y) / max(1.0, (frame_h / 2.0))  # -1..1 (positivo hacia abajo)
     return float(dx), float(dy)
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(str(name), "")
+    if raw is None:
+        return bool(default)
+    v = str(raw).strip().lower()
+    if not v:
+        return bool(default)
+    return v in {"1", "true", "t", "yes", "y", "on"}
+
+def _ptz_zone_tracking_vector(
+    frame_w: int,
+    frame_h: int,
+    bbox_xyxy,
+    *,
+    tolerance_frac: float = 0.20,  # compat: ignorado (tracking por zonas)
+    max_speed: float = 0.60,  # compat: ignorado (speed fijo)
+) -> tuple[float, float]:
+    fw = max(1, int(frame_w))
+    fh = max(1, int(frame_h))
+    try:
+        x1, y1, x2, y2 = bbox_xyxy
+    except Exception:
+        return 0.0, 0.0
+
+    cx = (float(x1) + float(x2)) / 2.0
+    cy = (float(y1) + float(y2)) / 2.0
+    fx = float(fw) / 2.0
+    fy = float(fh) / 2.0
+
+    deadzone_x = float(fw) * 0.12
+    deadzone_y = float(fh) * 0.12
+
+    pan = 0.0
+    if cx < (fx - deadzone_x):
+        pan = -0.12
+    elif cx > (fx + deadzone_x):
+        pan = 0.12
+
+    tilt = 0.0
+    if cy < (fy - deadzone_y):
+        tilt = 0.12
+    elif cy > (fy + deadzone_y):
+        tilt = -0.12
+
+    if _env_flag("PTZ_INVERT_PAN", False):
+        pan = -1.0 * float(pan)
+    if _env_flag("PTZ_INVERT_TILT", False):
+        tilt = -1.0 * float(tilt)
+
+    moving = (abs(float(pan)) > 1e-6) or (abs(float(tilt)) > 1e-6)
+    print(
+        "[TRACKING_CMD]",
+        f"cx={cx:.1f} cy={cy:.1f} fx={fx:.1f} fy={fy:.1f} pan={float(pan):.3f} tilt={float(tilt):.3f} "
+        f"moving={bool(moving)}",
+    )
+    return float(pan), float(tilt)
+
+
+# Tracking PTZ por zonas (sin tocar `src/video_processor.py`).
+video_processor_module.ptz_centering_vector = _ptz_zone_tracking_vector
 
 def _ptz_centering_vector(
     frame_w: int,
@@ -491,7 +556,10 @@ def _ptz_centering_vector(
     """
     fw = max(1, int(frame_w))
     fh = max(1, int(frame_h))
-    x1, y1, x2, y2 = bbox_xyxy
+    try:
+        x1, y1, x2, y2 = bbox_xyxy
+    except Exception:
+        return 0.0, 0.0
     cx = (float(x1) + float(x2)) / 2.0
     cy = (float(y1) + float(y2)) / 2.0
     fx = float(fw) / 2.0
@@ -570,15 +638,10 @@ class _InspectionPatrolWorker:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._patrolling = False
         self._dir = 1.0
-        self._sweep_started_at: float | None = None
-        try:
-            self._sweep_duration_s = float(os.environ.get("PTZ_SWEEP_DURATION_S", "14.0"))
-        except Exception:
-            self._sweep_duration_s = 14.0
-        try:
-            self._sweep_speed = float(os.environ.get("PTZ_SWEEP_SPEED", "0.08"))
-        except Exception:
-            self._sweep_speed = 0.08
+        self._segment_started_at: float | None = None
+        self._next_action_at = 0.0
+        self._phase = "move"  # move -> stop_wait -> move...
+        self._stop_sent_in_pause = False
     def start(self):
         """
         Inicia el hilo de patrullaje (idempotente).
@@ -599,60 +662,77 @@ class _InspectionPatrolWorker:
         Returns:
             None.
         """
-        global last_confirmed_detection_at, inspection_mode_enabled
+        global inspection_mode_enabled
         while not self._stop.is_set():
-            time.sleep(0.35)
+            time.sleep(0.05)
             with state_lock:
                 enabled = bool(inspection_mode_enabled)
                 ptz_ok = bool(is_ptz_capable)
                 tracking = bool(auto_tracking_enabled)
-                last_det = last_confirmed_detection_at
                 detected = bool(current_detection_state.get("detected"))
-            # Si hay amenaza confirmada, detener inspecciÃ³n de inmediato (sin tocar tracking).
-            if detected:
-                ptz_worker.enqueue_stop()
-                self._patrolling = False
-                continue
             configured_ptz = bool(is_camera_configured_ptz())
+            paused_by_detection = bool(tracking and detected)
             if not enabled or not ptz_ok or not configured_ptz:
                 if self._patrolling:
                     ptz_worker.enqueue_stop()
                     self._patrolling = False
+                self._segment_started_at = None
+                self._phase = "move"
+                self._next_action_at = 0.0
+                self._stop_sent_in_pause = False
                 continue
             now = time.time()
-            idle = (last_det is None) or ((now - float(last_det)) >= self._idle_s)
-            print(
-                "[INSPECTION]",
-                f"enabled={enabled} ptz_ready={bool(ptz_ok and configured_ptz)} detected={detected} idle={idle} "
-                f"moving={self._patrolling}",
-            )
-            # Regla: inspección solo si no hay tracking activo, o si no hay detección confirmada.
-            # Si hay detección confirmada, el tracking (si está activo) tiene prioridad.
-            if tracking and detected:
-                if self._patrolling:
+            x_speed = float(0.08) * float(self._dir)
+
+            if paused_by_detection:
+                if self._patrolling and not self._stop_sent_in_pause:
                     ptz_worker.enqueue_stop()
-                    self._patrolling = False
+                    self._stop_sent_in_pause = True
+                self._patrolling = False
+                self._segment_started_at = None
+                self._phase = "move"
+                self._next_action_at = 0.0
+                print(
+                    "[INSPECTION_CMD]",
+                    f"enabled={enabled} direction={'right' if self._dir > 0 else 'left'} x_speed={x_speed:.3f} "
+                    f"paused_by_detection={bool(paused_by_detection)}",
+                )
                 continue
-            if idle:
-                # Pan muy lento y continuo (solo eje X). DuraciÃ³n moderada para suavidad.
-                if self._sweep_started_at is None:
-                    self._sweep_started_at = now
-                elapsed = now - float(self._sweep_started_at)
-                if elapsed >= float(self._sweep_duration_s):
-                    ptz_worker.enqueue_stop()
-                    self._patrolling = False
-                    self._dir = -1.0 * float(self._dir)
-                    self._sweep_started_at = now
-                    continue
-                # Solo pan horizontal; velocidad baja y duración corta para evitar límites.
-                x_speed = _clamp(float(self._sweep_speed) * float(self._dir), -0.08, 0.08)
-                ptz_worker.enqueue_move(x=x_speed, y=0.0, zoom=0.0, duration_s=0.35, source="auto")
+
+            self._stop_sent_in_pause = False
+
+            if self._segment_started_at is None:
+                self._segment_started_at = now
+                self._phase = "move"
+                self._next_action_at = 0.0
+
+            # Cambiar direcciÃ³n cada 8 segundos.
+            if (now - float(self._segment_started_at)) >= 8.0:
+                self._dir = -1.0 * float(self._dir)
+                self._segment_started_at = now
+
+            x_speed = float(0.08) * float(self._dir)
+
+            if float(self._next_action_at) > 0.0 and now < float(self._next_action_at):
+                continue
+
+            if str(self._phase) == "move":
+                ptz_worker.enqueue_move(x=float(x_speed), y=0.0, zoom=0.0, duration_s=0.35, source="inspection")
                 self._patrolling = True
+                self._phase = "stop_wait"
+                self._next_action_at = now + 0.35
             else:
                 if self._patrolling:
                     ptz_worker.enqueue_stop()
-                    self._patrolling = False
-                self._sweep_started_at = None
+                self._patrolling = False
+                self._phase = "move"
+                self._next_action_at = now + 0.50
+
+            print(
+                "[INSPECTION_CMD]",
+                f"enabled={enabled} direction={'right' if self._dir > 0 else 'left'} x_speed={x_speed:.3f} "
+                f"paused_by_detection={bool(paused_by_detection)}",
+            )
 inspection_worker = _InspectionPatrolWorker(idle_s=10.0)
 inspection_worker.start()
 
@@ -1008,6 +1088,13 @@ live_deps = LiveStreamDeps(
     app_root_path=str(app.root_path),
 )
 
+def _ptz_tracking_move(**kwargs):
+    x = float(kwargs.get("x") or 0.0)
+    y = float(kwargs.get("y") or 0.0)
+    z = float(kwargs.get("zoom") or 0.0)
+    # Tracking estable: duracion fija y fuente distinguible en logs.
+    ptz_worker.enqueue_move(x=x, y=y, zoom=z, duration_s=0.25, source="tracking")
+
 live_processor = LiveVideoProcessor(
     reader=live_reader,
     model=yolo_model,
@@ -1018,7 +1105,7 @@ live_processor = LiveVideoProcessor(
     get_camera_mode=lambda: str(camera_source_mode),
     is_tracking_enabled=lambda: bool(auto_tracking_enabled),
     is_camera_configured_ptz=is_camera_configured_ptz,
-    ptz_move=lambda **kwargs: ptz_worker.enqueue_move(source="auto", **kwargs),
+    ptz_move=_ptz_tracking_move,
     ptz_stop=ptz_worker.enqueue_stop,
     state_lock=state_lock,
     detection_state=current_detection_state,
