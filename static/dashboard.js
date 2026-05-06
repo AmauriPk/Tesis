@@ -148,26 +148,23 @@
       const el = byId(id);
       if (!el) return;
 
-      let timer = null;
-      let stopSent = false;
+      let ptzMoving = false;
+      let stopSent = true;
       const send = () => postJson("/ptz_move", { ...vec, duration_s: 0.6 });
 
       const start = (ev) => {
         ev?.preventDefault?.();
-        if (timer) return;
+        if (ptzMoving) return;
         if (typeof activeStop === "function") activeStop(ev);
+        ptzMoving = true;
         stopSent = false;
         send();
-        timer = window.setInterval(send, 450);
         activeStop = stop;
       };
 
       const stop = (ev) => {
         ev?.preventDefault?.();
-        if (timer) {
-          window.clearInterval(timer);
-          timer = null;
-        }
+        ptzMoving = false;
         if (stopSent) return;
         stopSent = true;
         postJson("/api/ptz_stop", {});

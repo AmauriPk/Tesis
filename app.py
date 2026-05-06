@@ -2132,12 +2132,27 @@ def _require_ptz_capable() -> None:
     if not ok:
         abort(403)
 
+
+def is_ptz_ready_for_manual() -> bool:
+    return bool(is_camera_configured_ptz() or is_ptz_capable)
+
 @app.post("/ptz_move")
 @login_required
 @role_required("operator")
 def ptz_move():
     """Movimiento PTZ (joystick) o vector libre; bloqueado si la cámara no es PTZ."""
-    _require_ptz_capable()
+    configured_ptz = bool(is_camera_configured_ptz())
+    ptz_capable = bool(is_ptz_capable)
+    ready = bool(is_ptz_ready_for_manual())
+    print(
+        "[PTZ_MANUAL_READY]",
+        {"configured_ptz": configured_ptz, "is_ptz_capable": ptz_capable, "ready": ready},
+    )
+    if not ready:
+        return (
+            jsonify({"ok": False, "error": "PTZ manual bloqueado: la cámara no está configurada como PTZ"}),
+            403,
+        )
     with app.app_context():
         cfg = get_or_create_camera_config()
         host = (cfg.onvif_host or "").strip()
@@ -2178,7 +2193,18 @@ def ptz_move():
 @role_required("operator")
 def ptz_stop():
     """Stop PTZ; bloqueado si la cámara no es PTZ."""
-    _require_ptz_capable()
+    configured_ptz = bool(is_camera_configured_ptz())
+    ptz_capable = bool(is_ptz_capable)
+    ready = bool(is_ptz_ready_for_manual())
+    print(
+        "[PTZ_MANUAL_READY]",
+        {"configured_ptz": configured_ptz, "is_ptz_capable": ptz_capable, "ready": ready},
+    )
+    if not ready:
+        return (
+            jsonify({"ok": False, "error": "PTZ manual bloqueado: la cámara no está configurada como PTZ"}),
+            403,
+        )
     global auto_tracking_enabled, inspection_mode_enabled
     with state_lock:
         auto_tracking_enabled = False
