@@ -201,6 +201,21 @@
     if (panel) panel.style.display = isPtz ? "" : "none";
   };
 
+  const updateDetectionSummary = async () => {
+    const data = await fetchJson("/api/detection_summary");
+    const totalEvents = Number(data.total_events || 0);
+    const openEvents = Number(data.open_events || 0);
+    const withEv = Number(data.events_with_evidence || 0);
+    const maxConf = Number(data.max_confidence || 0);
+
+    const elEvents = byId("summaryEvents");
+    if (elEvents) elEvents.textContent = `Eventos: ${totalEvents} (abiertos: ${openEvents})`;
+    const elEv = byId("summaryEvidence");
+    if (elEv) elEv.textContent = `Con evidencia: ${withEv}`;
+    const elMax = byId("summaryMaxConf");
+    if (elMax) elMax.textContent = `Conf máx: ${fmtPct(maxConf)}`;
+  };
+
   const postJson = (url, payload) =>
     fetchJson(url, { method: "POST", body: JSON.stringify(payload || {}) }).catch(() => null);
 
@@ -523,10 +538,11 @@
     bindPtz();
     bindManual();
 
-    await Promise.allSettled([updateStatus(), updateAlerts(), updateCameraUi()]);
+    await Promise.allSettled([updateStatus(), updateAlerts(), updateCameraUi(), updateDetectionSummary()]);
     setInterval(() => updateStatus().catch(() => null), 2000);
     setInterval(() => updateAlerts().catch(() => null), 4000);
     setInterval(() => updateCameraUi().catch(() => null), 5000);
+    setInterval(() => updateDetectionSummary().catch(() => null), 7000);
   };
 
   if (document.readyState === "loading") {

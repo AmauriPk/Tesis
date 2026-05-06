@@ -2335,6 +2335,7 @@ def api_recent_alerts():
                         "class_name": r["class_name"],
                         "source": r["source"],
                         "camera_mode": r["camera_mode"],
+                        "confirmed": True,
                         # Compat frontend: `image_path` (relativo, sin slash inicial) y `image_url`.
                         "image_path": image_path_rel,
                         "image_url": image_url,
@@ -2342,7 +2343,7 @@ def api_recent_alerts():
                     }
                 )
             print(f"[ALERTS] db={db_path} table={using_table} rows={len(alerts)}")
-            return jsonify({"status": "success", "alerts": alerts, "table": using_table}), 200
+            return jsonify({"ok": True, "status": "success", "alerts": alerts, "table": using_table}), 200
         finally:
             try:
                 con.close()
@@ -2351,7 +2352,7 @@ def api_recent_alerts():
     except Exception as e:
         # DB bloqueada/corrupta/etc => no romper UI del operador.
         print(f"[ERROR] Panel de Alertas DB: {e}")
-        return jsonify({"status": "success", "alerts": []}), 200
+        return jsonify({"ok": True, "status": "success", "alerts": []}), 200
 
 
 @app.get("/api/recent_detection_events")
@@ -2373,7 +2374,7 @@ def api_recent_detection_events():
     events: list[dict] = []
     try:
         if not os.path.exists(db_path):
-            return jsonify({"status": "success", "events": []}), 200
+            return jsonify({"ok": True, "status": "success", "events": []}), 200
 
         con = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
         con.row_factory = sqlite3.Row
@@ -2396,11 +2397,23 @@ def api_recent_detection_events():
                 if best_path:
                     p = str(best_path).replace("\\", "/").lstrip("/")
                     best_url = "/" + p
+
+                started_at = r["started_at"]
+                ended_at = r["ended_at"]
+                duration_s = None
+                try:
+                    s_epoch = _parse_iso_ts_to_epoch(str(started_at)) if started_at else None
+                    e_epoch = _parse_iso_ts_to_epoch(str(ended_at)) if ended_at else None
+                    if s_epoch is not None and e_epoch is not None:
+                        duration_s = max(0.0, float(e_epoch - s_epoch))
+                except Exception:
+                    duration_s = None
                 events.append(
                     {
                         "id": int(r["id"]) if r["id"] is not None else None,
                         "started_at": r["started_at"],
                         "ended_at": r["ended_at"],
+                        "duration_s": duration_s,
                         "max_confidence": float(r["max_confidence"]) if r["max_confidence"] is not None else 0.0,
                         "detection_count": int(r["detection_count"]) if r["detection_count"] is not None else 0,
                         "best_bbox": (r["best_bbox_text"] or "-") if "best_bbox_text" in r.keys() else "-",
@@ -2409,7 +2422,7 @@ def api_recent_detection_events():
                         "source": r["source"] or "",
                     }
                 )
-            return jsonify({"status": "success", "events": events}), 200
+            return jsonify({"ok": True, "status": "success", "events": events}), 200
         finally:
             try:
                 con.close()
@@ -2417,7 +2430,297 @@ def api_recent_detection_events():
                 pass
     except Exception as e:
         print(f"[EVENTS][ERROR] {e}")
-        return jsonify({"status": "success", "events": []}), 200
+        return jsonify({"ok": True, "status": "success", "events": []}), 200
+
+
+@app.get("/api/export_detection_events.csv")
+@login_required
+@role_required("operator", "admin")
+def api_export_detection_events_csv():
+    """Exporta eventos agrupados a CSV (útil para tesis)."""
+    db_path = _get_metrics_db_path_abs()
+    header = "event_id,started_at,ended_at,duration_s,max_confidence,detection_count,best_bbox,best_evidence_path,status,source\n"
+    if not os.path.exists(db_path):
+        return Response(header, mimetype="text/csv")
+
+    con = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
+    con.row_factory = sqlite3.Row
+    try:
+        _ensure_detection_events_schema(con)
+        cur = con.cursor()
+        cur.execute(
+            """
+            SELECT id, started_at, ended_at, max_confidence, detection_count, best_bbox_text, best_evidence_path, status, source
+            FROM detection_events
+            ORDER BY id ASC
+            """
+        )
+        rows = cur.fetchall() or []
+
+        def esc(v) -> str:
+            s = "" if v is None else str(v)
+            s = s.replace('"', '""')
+            return f"\"{s}\""
+
+        lines = [header.rstrip("\n")]
+        for r in rows:
+            started_at = r["started_at"]
+            ended_at = r["ended_at"]
+            duration_s = ""
+            try:
+                s_epoch = _parse_iso_ts_to_epoch(str(started_at)) if started_at else None
+                e_epoch = _parse_iso_ts_to_epoch(str(ended_at)) if ended_at else None
+                if s_epoch is not None and e_epoch is not None:
+                    duration_s = f"{max(0.0, float(e_epoch - s_epoch)):.3f}"
+            except Exception:
+                duration_s = ""
+
+            lines.append(
+                ",".join(
+                    [
+                        str(int(r["id"])),
+                        esc(r["started_at"] or ""),
+                        esc(r["ended_at"] or ""),
+                        duration_s,
+                        f"{float(r['max_confidence'] or 0.0):.6f}",
+                        str(int(r["detection_count"] or 0)),
+                        esc(r["best_bbox_text"] or ""),
+                        esc(r["best_evidence_path"] or ""),
+                        esc(r["status"] or ""),
+                        esc(r["source"] or ""),
+                    ]
+                )
+            )
+
+        csv_bytes = ("\n".join(lines) + "\n").encode("utf-8")
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fname = f"detection_events_{stamp}.csv"
+        return Response(
+            csv_bytes,
+            mimetype="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={fname}"},
+        )
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+
+
+@app.get("/api/detection_summary")
+@login_required
+@role_required("operator", "admin")
+def api_detection_summary():
+    """Resumen estadístico de eventos/evidencias (para UI)."""
+    db_path = _get_metrics_db_path_abs()
+    evidence_dir = (os.environ.get("EVIDENCE_DIR") or EVIDENCE_DIR).strip() or EVIDENCE_DIR
+    abs_ev = evidence_dir if os.path.isabs(evidence_dir) else os.path.join(app.root_path, evidence_dir)
+    abs_ev = os.path.abspath(abs_ev)
+
+    summary = {
+        "ok": True,
+        "total_events": 0,
+        "open_events": 0,
+        "closed_events": 0,
+        "total_raw_detections": 0,
+        "avg_confidence": 0.0,
+        "max_confidence": 0.0,
+        "events_with_evidence": 0,
+        "evidence_files_count": 0,
+    }
+
+    try:
+        if os.path.isdir(abs_ev):
+            summary["evidence_files_count"] = len(
+                [n for n in os.listdir(abs_ev) if n.lower().endswith((".jpg", ".jpeg", ".png"))]
+            )
+    except Exception:
+        pass
+
+    if not os.path.exists(db_path):
+        return jsonify(summary), 200
+
+    con = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
+    con.row_factory = sqlite3.Row
+    try:
+        _ensure_detection_events_schema(con)
+        cur = con.cursor()
+        cur.execute("SELECT COUNT(1) FROM detection_events")
+        summary["total_events"] = int(cur.fetchone()[0] or 0)
+
+        cur.execute("SELECT COUNT(1) FROM detection_events WHERE status='open'")
+        summary["open_events"] = int(cur.fetchone()[0] or 0)
+
+        cur.execute("SELECT COUNT(1) FROM detection_events WHERE status='closed'")
+        summary["closed_events"] = int(cur.fetchone()[0] or 0)
+
+        cur.execute(
+            "SELECT COUNT(1) FROM detection_events WHERE best_evidence_path IS NOT NULL AND TRIM(best_evidence_path) <> ''"
+        )
+        summary["events_with_evidence"] = int(cur.fetchone()[0] or 0)
+
+        cur.execute("SELECT AVG(max_confidence), MAX(max_confidence) FROM detection_events")
+        row = cur.fetchone()
+        if row:
+            summary["avg_confidence"] = float(row[0] or 0.0)
+            summary["max_confidence"] = float(row[1] or 0.0)
+
+        # Conteos técnicos (detections_v2)
+        try:
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = {str(r[0]) for r in (cur.fetchall() or [])}
+            if "detections_v2" in tables:
+                cur.execute("SELECT COUNT(1) FROM detections_v2")
+                summary["total_raw_detections"] = int(cur.fetchone()[0] or 0)
+        except Exception:
+            pass
+
+        return jsonify(summary), 200
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+
+
+@app.post("/api/admin/cleanup_test_data")
+@login_required
+@role_required("admin")
+def api_admin_cleanup_test_data():
+    """
+    Limpieza segura (admin). No borra nada si no se recibe true explícito.
+    """
+    payload = request.get_json(silent=True) or {}
+    clear_raw = bool(payload.get("clear_raw_detections"))
+    clear_events = bool(payload.get("clear_events"))
+    clear_evidence = bool(payload.get("clear_evidence"))
+
+    db_path = _get_metrics_db_path_abs()
+    evidence_dir = (os.environ.get("EVIDENCE_DIR") or EVIDENCE_DIR).strip() or EVIDENCE_DIR
+    abs_ev = evidence_dir if os.path.isabs(evidence_dir) else os.path.join(app.root_path, evidence_dir)
+    abs_ev = os.path.abspath(abs_ev)
+
+    counts = {"raw_detections": 0, "events": 0, "evidence_files": 0}
+    try:
+        if os.path.isdir(abs_ev):
+            counts["evidence_files"] = len(
+                [n for n in os.listdir(abs_ev) if n.lower().endswith((".jpg", ".jpeg", ".png"))]
+            )
+    except Exception:
+        pass
+
+    con = None
+    try:
+        if os.path.exists(db_path):
+            con = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
+            con.row_factory = sqlite3.Row
+            _ensure_detection_events_schema(con)
+            cur = con.cursor()
+            try:
+                cur.execute("SELECT COUNT(1) FROM detection_events")
+                counts["events"] = int(cur.fetchone()[0] or 0)
+            except Exception:
+                pass
+            try:
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = {str(r[0]) for r in (cur.fetchall() or [])}
+                if "detections_v2" in tables:
+                    cur.execute("SELECT COUNT(1) FROM detections_v2")
+                    counts["raw_detections"] = int(cur.fetchone()[0] or 0)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    if not (clear_raw or clear_events or clear_evidence):
+        try:
+            if con is not None:
+                con.close()
+        except Exception:
+            pass
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "preview_only": True,
+                    "counts": counts,
+                    "message": "Nada borrado. Envía true explícito en clear_* para ejecutar.",
+                }
+            ),
+            200,
+        )
+
+    deleted = {"raw_detections": 0, "events": 0, "evidence_files": 0}
+    errors: list[str] = []
+
+    if con is not None:
+        try:
+            cur = con.cursor()
+            if clear_events:
+                cur.execute("DELETE FROM detection_events")
+                deleted["events"] = int(cur.rowcount or 0)
+            if clear_raw:
+                try:
+                    cur.execute("DELETE FROM detections_v2")
+                    deleted["raw_detections"] = int(cur.rowcount or 0)
+                except Exception:
+                    pass
+                try:
+                    cur.execute("DELETE FROM inference_frames")
+                except Exception:
+                    pass
+            if clear_events or clear_raw:
+                con.commit()
+        except Exception as e:
+            errors.append(f"db_delete_failed: {e}")
+            try:
+                con.rollback()
+            except Exception:
+                pass
+    else:
+        if clear_events or clear_raw:
+            errors.append("db_missing_or_unavailable")
+
+    if clear_evidence:
+        try:
+            if os.path.isdir(abs_ev):
+                for name in os.listdir(abs_ev):
+                    if not name.lower().endswith((".jpg", ".jpeg", ".png")):
+                        continue
+                    abs_path = os.path.abspath(os.path.join(abs_ev, name))
+                    if not (abs_path == abs_ev or abs_path.startswith(abs_ev + os.sep)):
+                        continue
+                    try:
+                        os.remove(abs_path)
+                        deleted["evidence_files"] += 1
+                    except Exception:
+                        continue
+        except Exception as e:
+            errors.append(f"evidence_delete_failed: {e}")
+
+    try:
+        if con is not None:
+            con.close()
+    except Exception:
+        pass
+
+    return (
+        jsonify(
+            {
+                "ok": True,
+                "preview_only": False,
+                "requested": {
+                    "clear_raw_detections": clear_raw,
+                    "clear_events": clear_events,
+                    "clear_evidence": clear_evidence,
+                },
+                "counts_before": counts,
+                "deleted": deleted,
+                "errors": errors,
+            }
+        ),
+        200,
+    )
 
 def _safe_rel_path(rel_path: str) -> str:
     """

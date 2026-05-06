@@ -47,6 +47,7 @@ Thumbs.db
 # Config local / runtime
 config_camara.json
 instance/
+uploads/
 
 # Notas locales
 Indicacion para git.txt

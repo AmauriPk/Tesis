@@ -270,6 +270,11 @@
                                 <i class="fa-solid fa-table-list"></i> Alertas Recientes
                             </div>
                             <div class="card-body">
+                                <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                                    <span class="badge text-bg-dark border" id="summaryEvents">Eventos: -</span>
+                                    <span class="badge text-bg-dark border" id="summaryEvidence">Con evidencia: -</span>
+                                    <span class="badge text-bg-dark border" id="summaryMaxConf">Conf máx: -</span>
+                                </div>
                                 <div class="d-flex gap-2 mb-2">
                                     <button class="btn btn-sm btn-outline-info" id="btnAlertsEvents" type="button">
                                         Eventos
@@ -277,6 +282,10 @@
                                     <button class="btn btn-sm btn-outline-secondary" id="btnAlertsRaw" type="button">
                                         Ver registros técnicos
                                     </button>
+                                    <a class="btn btn-sm btn-outline-success ms-auto" id="btnExportEventsCsv"
+                                       href="/api/export_detection_events.csv" target="_blank" rel="noopener">
+                                        Exportar eventos CSV
+                                    </a>
                                 </div>
                                 <div class="table-responsive">
                                     <table class="table table-dark table-hover table-sm align-middle mb-0">
