@@ -136,6 +136,14 @@
       if (el) el.addEventListener("click", fn);
     };
 
+    let activeStop = null;
+    const stopAll = (ev) => {
+      if (typeof activeStop === "function") activeStop(ev);
+    };
+    window.addEventListener("mouseup", stopAll);
+    window.addEventListener("touchend", stopAll);
+    window.addEventListener("touchcancel", stopAll);
+
     const bindHoldMove = (id, vec) => {
       const el = byId(id);
       if (!el) return;
@@ -147,9 +155,11 @@
       const start = (ev) => {
         ev?.preventDefault?.();
         if (timer) return;
+        if (typeof activeStop === "function") activeStop(ev);
         stopSent = false;
         send();
         timer = window.setInterval(send, 450);
+        activeStop = stop;
       };
 
       const stop = (ev) => {
@@ -161,12 +171,11 @@
         if (stopSent) return;
         stopSent = true;
         postJson("/api/ptz_stop", {});
+        if (activeStop === stop) activeStop = null;
       };
 
       el.addEventListener("mousedown", start);
       el.addEventListener("touchstart", start, { passive: false });
-      window.addEventListener("mouseup", stop);
-      window.addEventListener("touchend", stop);
       el.addEventListener("mouseleave", stop);
     };
 
@@ -174,7 +183,7 @@
     bindHoldMove("ptzDown", { x: 0.0, y: -1.0, zoom: 0.0 });
     bindHoldMove("ptzLeft", { x: -1.0, y: 0.0, zoom: 0.0 });
     bindHoldMove("ptzRight", { x: 1.0, y: 0.0, zoom: 0.0 });
-    bind("ptzStop", () => postJson("/ptz_stop", {}));
+    bind("ptzStop", () => postJson("/api/ptz_stop", {}));
 
     const autoToggle = byId("autoTrackingToggle");
     if (autoToggle) {

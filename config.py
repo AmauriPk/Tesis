@@ -18,6 +18,14 @@ RTSP_CONFIG = {
     "buffer_size": _env_int("RTSP_BUFFER_SIZE", 1),
 }
 
+# ======================== CONFIGURACIÃ“N ONVIF ========================
+ONVIF_CONFIG = {
+    "host": os.environ.get("ONVIF_HOST", ""),
+    "port": _env_int("ONVIF_PORT", 80),
+    "username": os.environ.get("ONVIF_USERNAME", os.environ.get("RTSP_USERNAME", "")),
+    "password": os.environ.get("ONVIF_PASSWORD", os.environ.get("RTSP_PASSWORD", "")),
+}
+
 # ======================== CONFIGURACIÃ“N YOLO ========================
 YOLO_CONFIG = {
     "model_path": os.environ.get("YOLO_MODEL_PATH", "runs/detect/weights/best.pt"),
@@ -96,6 +104,7 @@ for _dir in [DATASET_NEGATIVE_DIR, DATASET_POSITIVE_PENDING_DIR, DATASET_LIMPIAS
 
 __all__ = [
     "FLASK_CONFIG",
+    "ONVIF_CONFIG",
     "PERSISTENCE_CONFIG",
     "PROJECT_ROOT",
     "PTZ_CONFIG",

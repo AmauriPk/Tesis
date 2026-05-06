@@ -62,7 +62,7 @@ try:
 except Exception:  # pragma: no cover
     ffmpeg = None
 
-from config import FLASK_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG, _env_float, _env_int
+from config import FLASK_CONFIG, ONVIF_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG, _env_float, _env_int
 from src.system_core import CameraConfig, FrameRecord, MetricsDBWriter, PTZController, User, db
 from src.video_processor import LiveStreamDeps, LiveVideoProcessor, RTSPLatestFrameReader
 from src.system_core import clamp, select_priority_detection
@@ -155,21 +155,65 @@ def allowed_file(filename: str) -> bool:
     """Valida extensión del archivo subido contra `STORAGE_CONFIG['allowed_extensions']`."""
     return "." in filename and filename.rsplit(".", 1)[1].lower() in app.config["ALLOWED_EXTENSIONS"]
 
+def sync_onvif_config_from_env(cfg: CameraConfig) -> CameraConfig:
+    """
+    Completa configuraciÃ³n ONVIF desde variables de entorno si estÃ¡ vacÃ­a.
+
+    Regla: no sobreescribe valores ya persistidos en DB.
+    """
+    changed = False
+
+    host = (ONVIF_CONFIG.get("host") or "").strip()
+    username = (ONVIF_CONFIG.get("username") or "").strip()
+    password = (ONVIF_CONFIG.get("password") or "").strip()
+
+    try:
+        port_env = int(ONVIF_CONFIG.get("port") or 80)
+    except Exception:
+        port_env = 80
+
+    if not (cfg.onvif_host or "").strip() and host:
+        cfg.onvif_host = host
+        changed = True
+    if not (cfg.onvif_username or "").strip() and username:
+        cfg.onvif_username = username
+        changed = True
+    if not (cfg.onvif_password or "").strip() and password:
+        cfg.onvif_password = password
+        changed = True
+    if not cfg.onvif_port:
+        cfg.onvif_port = int(port_env or 80)
+        changed = True
+
+    if changed:
+        db.session.commit()
+    return cfg
+
+def _normalized_onvif_port(port: int | None) -> int:
+    """Normaliza el puerto ONVIF, evitando el puerto RTSP (554)."""
+    try:
+        p = int(port or 80)
+    except Exception:
+        p = 80
+    if p == 554:
+        return 80
+    return p
+
 def get_or_create_camera_config() -> CameraConfig:
     """Obtiene o inicializa el registro singleton con configuración RTSP/ONVIF."""
     cfg = CameraConfig.query.order_by(CameraConfig.id.asc()).first()
     if cfg:
-        return cfg
+        return sync_onvif_config_from_env(cfg)
 
     cfg = CameraConfig(
         camera_type="fixed",
         rtsp_url=RTSP_CONFIG.get("url"),
         rtsp_username=RTSP_CONFIG.get("username"),
         rtsp_password=RTSP_CONFIG.get("password"),
-        onvif_host=None,
-        onvif_port=80,
-        onvif_username=None,
-        onvif_password=None,
+        onvif_host=(ONVIF_CONFIG.get("host") or "").strip() or None,
+        onvif_port=int(ONVIF_CONFIG.get("port") or 80),
+        onvif_username=(ONVIF_CONFIG.get("username") or "").strip() or None,
+        onvif_password=(ONVIF_CONFIG.get("password") or "").strip() or None,
     )
     db.session.add(cfg)
     db.session.commit()
@@ -645,9 +689,12 @@ def _probe_onvif_ptz_capability() -> bool:
         # - ONVIF típicamente: 80 / 8000 / 8080 (según fabricante)
         # Evitamos asumir que el puerto ONVIF es el mismo que el puerto RTSP.
         try:
-            configured_onvif_port = int(cfg.onvif_port or 80)
+            raw_onvif_port = int(cfg.onvif_port or 80)
         except Exception:
-            configured_onvif_port = 80
+            raw_onvif_port = 80
+        if raw_onvif_port == 554:
+            print("[ONVIF][WARN] onvif_port=554 parece RTSP; usando 80 para ONVIF.")
+        configured_onvif_port = _normalized_onvif_port(raw_onvif_port)
         username = (cfg.onvif_username or "").strip()
         password = (cfg.onvif_password or "").strip()
 
@@ -674,10 +721,10 @@ def _probe_onvif_ptz_capability() -> bool:
         Returns:
             Lista de puertos a probar en orden.
         """
-        # Heurística: si el usuario dejó 554 (RTSP) como ONVIF, probar primero puertos ONVIF comunes.
         common = [80, 8000, 8080]
         if port == 554:
-            return common + [554]
+            print("[ONVIF][WARN] ONVIF_PORT=554 parece RTSP; se ignorará y se probarán puertos ONVIF comunes.")
+            return common
         ports: list[int] = [port]
         for p in common:
             if p not in ports:
@@ -856,11 +903,26 @@ class PTZCommandWorker:
             cfg = get_or_create_camera_config()
             if not cfg.onvif_host or not cfg.onvif_username or not cfg.onvif_password:
                 return None
+            port = _normalized_onvif_port(cfg.onvif_port)
+            if int(cfg.onvif_port or 0) == 554:
+                print("[ONVIF][WARN] onvif_port=554 parece RTSP; usando 80 para ONVIF.")
+            username = str(cfg.onvif_username or "")
+            password = str(cfg.onvif_password or "")
+            print(
+                "[PTZ_CFG]",
+                {
+                    "host": str(cfg.onvif_host or ""),
+                    "port": int(port),
+                    "username": username,
+                    "password_configurada": bool(password),
+                    "password_len": len(password) if password else 0,
+                },
+            )
             return PTZController(
                 host=cfg.onvif_host,
-                port=int(cfg.onvif_port or 80),
-                username=cfg.onvif_username,
-                password=cfg.onvif_password,
+                port=int(port),
+                username=username,
+                password=password,
             )
     def _run(self):
         """
@@ -1064,7 +1126,20 @@ def admin_camera_test():
     if not cfg.onvif_host or not cfg.onvif_username or not cfg.onvif_password:
         return jsonify({"ok": False, "error": "Completa host/usuario/contraseña ONVIF."}), 400
     try:
-        controller = PTZController(cfg.onvif_host, int(cfg.onvif_port or 80), cfg.onvif_username, cfg.onvif_password)
+        port = _normalized_onvif_port(cfg.onvif_port)
+        if int(cfg.onvif_port or 0) == 554:
+            print("[ONVIF][WARN] onvif_port=554 parece RTSP; usando 80 para ONVIF.")
+        print(
+            "[PTZ_CFG]",
+            {
+                "host": str(cfg.onvif_host or ""),
+                "port": int(port),
+                "username": str(cfg.onvif_username or ""),
+                "password_configurada": bool(cfg.onvif_password),
+                "password_len": len(cfg.onvif_password) if cfg.onvif_password else 0,
+            },
+        )
+        controller = PTZController(cfg.onvif_host, int(port), cfg.onvif_username, cfg.onvif_password)
         return jsonify(controller.test_connection())
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -1953,6 +2028,20 @@ def _require_ptz_capable() -> None:
 def ptz_move():
     """Movimiento PTZ (joystick) o vector libre; bloqueado si la cámara no es PTZ."""
     _require_ptz_capable()
+    with app.app_context():
+        cfg = get_or_create_camera_config()
+        host = (cfg.onvif_host or "").strip()
+        username = (cfg.onvif_username or "").strip()
+        password = (cfg.onvif_password or "").strip()
+        port = _normalized_onvif_port(cfg.onvif_port)
+
+    if not host:
+        return jsonify({"ok": False, "error": "ONVIF_HOST no configurado."}), 400
+    if not username or not password:
+        return jsonify({"ok": False, "error": "Credenciales ONVIF incompletas (ONVIF_USERNAME/ONVIF_PASSWORD)."}), 400
+    if int(cfg.onvif_port or 0) == 554:
+        print("[ONVIF][WARN] onvif_port=554 parece RTSP; usando 80 para ONVIF.")
+
     payload = request.get_json(silent=True) or {}
     direction = (payload.get("direction") or "").strip().lower()
     if direction:

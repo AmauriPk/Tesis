@@ -274,7 +274,6 @@ class PTZController:
             # CRÍTICO (Hikvision): anular espacios de coordenadas antes de enviar.
             request.Velocity.PanTilt.space = None
             request.Velocity.Zoom.space = None
-
             self._ptz.ContinuousMove(request)
             self._is_moving = True
 
