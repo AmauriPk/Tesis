@@ -134,11 +134,25 @@
         `;
         col.querySelector("button[data-action='revert']")?.addEventListener("click", async () => {
           clearAlerts();
+          const btn = col.querySelector("button[data-action='revert']");
+          const prevTxt = btn?.textContent;
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = "Procesando...";
+          }
           try {
-            await fetchJson("/api/revert_classification", { method: "POST", body: JSON.stringify({ path: relId }) });
+            const payload = String(relId || "").includes(":") ? { id: relId } : { path: relId };
+            await fetchJson("/api/revert_classification", { method: "POST", body: JSON.stringify(payload) });
             setAlert("historyOk", "Revertido.");
+            col.remove();
+            await loadPending().catch(() => null);
+            await loadHistory().catch(() => null);
           } catch (e) {
             setAlert("historyErr", e?.data?.message || e?.data?.error || "Error");
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = prevTxt || "Revertir";
+            }
           }
         });
         grid.appendChild(col);
@@ -152,6 +166,7 @@
     byId("btnRefreshDataset")?.addEventListener("click", () => loadPending().catch(() => null));
     byId("btnRefreshHistory")?.addEventListener("click", () => loadHistory().catch(() => null));
     loadPending().catch(() => null);
+    loadHistory().catch(() => null);
   };
 
   if (document.readyState === "loading") {

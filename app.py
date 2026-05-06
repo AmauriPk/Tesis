@@ -582,7 +582,6 @@ class _InspectionPatrolWorker:
         self._next_action_at = 0.0
         self._phase = "move"  # move -> stop_wait -> move...
         self._stop_sent_in_pause = False
-        self._last_sent: tuple[str, float] | None = None  # (phase, dir)
     def start(self):
         """
         Inicia el hilo de patrullaje (idempotente).
@@ -605,80 +604,69 @@ class _InspectionPatrolWorker:
         """
         global inspection_mode_enabled
         while not self._stop.is_set():
-            time.sleep(0.25)
-            with state_lock:
-                enabled = bool(inspection_mode_enabled)
-                tracking = bool(auto_tracking_enabled)
-                detected = bool(current_detection_state.get("detected"))
-            ptz_ok = bool(is_ptz_ready_for_automation())
-            paused_by_detection = bool(tracking and detected)
-            if not enabled or not ptz_ok:
-                if self._patrolling:
+            try:
+                time.sleep(0.25)
+                with state_lock:
+                    enabled = bool(inspection_mode_enabled)
+                    tracking = bool(auto_tracking_enabled)
+                    detected = bool(current_detection_state.get("detected"))
+                ptz_ok = bool(is_ptz_ready_for_automation())
+                paused_by_detection = bool(tracking and detected)
+
+                if not enabled or not ptz_ok:
+                    if self._patrolling:
+                        ptz_worker.enqueue_stop()
+                        self._patrolling = False
+                    self._segment_started_at = None
+                    self._phase = "move"
+                    self._next_action_at = 0.0
+                    self._stop_sent_in_pause = False
+                    continue
+
+                now = time.time()
+                x_speed = float(0.25) * float(self._dir)
+
+                if paused_by_detection:
+                    if self._patrolling and not self._stop_sent_in_pause:
+                        ptz_worker.enqueue_stop()
+                        self._stop_sent_in_pause = True
+                        print("[INSPECTION_CMD]", "phase=stop paused_by_detection=True")
+                    self._patrolling = False
+                    self._phase = "move"
+                    self._next_action_at = 0.0
+                    continue
+
+                self._stop_sent_in_pause = False
+
+                if float(self._next_action_at) > 0.0 and now < float(self._next_action_at):
+                    continue
+
+                phase = str(self._phase)
+                if phase == "move":
+                    ptz_worker.enqueue_move(x=float(x_speed), y=0.0, zoom=0.0, duration_s=2.0, source="inspection")
+                    self._patrolling = True
+                    self._phase = "wait_stop"
+                    self._next_action_at = now + 2.0
+                    print(
+                        "[INSPECTION_CMD]",
+                        f"phase=move direction={'right' if self._dir > 0 else 'left'} x={float(x_speed):.2f} duration=2.0",
+                    )
+                elif phase == "wait_stop":
                     ptz_worker.enqueue_stop()
                     self._patrolling = False
-                self._segment_started_at = None
-                self._phase = "move"
-                self._next_action_at = 0.0
-                self._stop_sent_in_pause = False
-                self._last_sent = None
-                continue
-            now = time.time()
-            x_speed = float(0.12) * float(self._dir)
-
-            if paused_by_detection:
-                if self._patrolling and not self._stop_sent_in_pause:
-                    ptz_worker.enqueue_stop()
-                    self._stop_sent_in_pause = True
-                    print("[INSPECTION_CMD]", "phase=stop paused_by_detection=True")
-                self._patrolling = False
-                self._segment_started_at = None
-                self._phase = "move"
-                self._next_action_at = 0.0
-                self._last_sent = None
-                continue
-
-            self._stop_sent_in_pause = False
-
-            if self._segment_started_at is None:
-                self._segment_started_at = now
-                self._phase = "move"
-                self._next_action_at = 0.0
-                self._last_sent = None
-
-            if float(self._next_action_at) > 0.0 and now < float(self._next_action_at):
-                continue
-
-            phase = str(self._phase)
-            last = self._last_sent
-            sig = (phase, float(self._dir))
-            if last is not None and (last[0], last[1]) == sig:
-                continue
-
-            if phase == "move":
-                ptz_worker.enqueue_move(x=float(x_speed), y=0.0, zoom=0.0, duration_s=2.0, source="inspection")
-                self._patrolling = True
-                self._phase = "wait_stop"
-                self._next_action_at = now + 2.0
-                print(
-                    "[INSPECTION_CMD]",
-                    f"phase=move direction={'right' if self._dir > 0 else 'left'} x={abs(float(x_speed)):.2f} duration=2.0",
-                )
-            elif phase == "wait_stop":
-                ptz_worker.enqueue_stop()
-                self._patrolling = False
-                self._phase = "wait_pause"
-                self._next_action_at = now + 0.5
-                print("[INSPECTION_CMD]", "phase=stop")
-            else:  # wait_pause
-                self._dir = -1.0 * float(self._dir)
-                self._phase = "move"
-                self._next_action_at = 0.0
-                print(
-                    "[INSPECTION_CMD]",
-                    f"phase=pause_done next_direction={'right' if self._dir > 0 else 'left'}",
-                )
-
-            self._last_sent = (str(self._phase), float(self._dir))
+                    self._phase = "wait_pause"
+                    self._next_action_at = now + 0.5
+                    print("[INSPECTION_CMD]", "phase=stop")
+                else:  # wait_pause
+                    self._dir = -1.0 * float(self._dir)
+                    self._phase = "move"
+                    self._next_action_at = 0.0
+                    print(
+                        "[INSPECTION_CMD]",
+                        f"phase=pause_done next_direction={'right' if self._dir > 0 else 'left'}",
+                    )
+            except Exception as e:
+                print(f"[INSPECTION_WORKER][ERROR] {e}")
 inspection_worker = _InspectionPatrolWorker(idle_s=10.0)
 inspection_worker.start()
 
@@ -892,6 +880,11 @@ class PTZCommandWorker:
                     "source": str(source or "manual"),
                 }
             )
+            print(
+                "[PTZ_QUEUE]",
+                f"enqueue move source={str(source or 'manual')} x={float(x_f):.3f} y={float(y_f):.3f} "
+                f"zoom={float(zoom):.3f} duration={float(duration_s):.2f}",
+            )
         except Exception:
             # NOTE: Idealmente capturar queue.Full para distinguir de otros errores.
             pass
@@ -927,6 +920,7 @@ class PTZCommandWorker:
                 pass
             self._last_vec = (0.0, 0.0)
             self._q.put_nowait({"type": "stop"})
+            print("[PTZ_QUEUE]", "enqueue stop")
         except Exception:
             # NOTE: Idealmente capturar queue.Full para distinguir de otros errores.
             pass
@@ -987,21 +981,30 @@ class PTZCommandWorker:
                 if self._controller is None:
                     self._controller = self._get_controller()
                 if self._controller is None:
+                    print(f"[PTZ_WORKER][ERROR] source={cmd_source} error=no_controller_configured")
                     continue
                 if cmd_type == "stop":
+                    print("[PTZ_WORKER]", "executing stop")
                     self._controller.stop()
+                    print("[PTZ_WORKER]", "done stop")
                     continue
                 if cmd_type == "move":
                     x = float(cmd.get("x") or 0.0)
                     y = float(cmd.get("y") or 0.0)
                     z = float(cmd.get("zoom") or 0.0)
                     duration_s = float(cmd.get("duration_s") or 0.15)
+                    print(
+                        "[PTZ_WORKER]",
+                        f"executing move source={cmd_source} x={float(x):.3f} y={float(y):.3f} "
+                        f"zoom={float(z):.3f} duration={float(duration_s):.2f}",
+                    )
                     self._controller.continuous_move(x=x, y=y, zoom=z, duration_s=duration_s)
+                    print("[PTZ_WORKER]", f"done move source={cmd_source}")
             except Exception as e:
                 # NOTE: Seria ideal capturar excepciones de red/ONVIF concretas para telemetria.
                 msg = str(e) or e.__class__.__name__
                 low = msg.lower()
-                if cmd_type == "move" and cmd_source == "auto" and ("out of bounds" in low):
+                if cmd_type == "move" and cmd_source in {"auto", "tracking", "inspection"} and ("out of bounds" in low):
                     print("[PTZ][WARN] Movimiento automático fuera de rango. Se ignora comando y se envía STOP.")
                     try:
                         if self._controller is not None:
@@ -1009,7 +1012,7 @@ class PTZCommandWorker:
                     except Exception:
                         pass
                     continue
-                print(f"[PTZ][ERROR] {e}")
+                print(f"[PTZ_WORKER][ERROR] source={cmd_source} error={msg}")
                 self._controller = None
 ptz_worker = PTZCommandWorker()
 ptz_worker.start()
@@ -1941,9 +1944,15 @@ def api_revert_classification():
     if not payload:
         payload = request.form.to_dict(flat=True)
 
+    req_path = (payload.get("path") or "").strip()
     img_id = (payload.get("id") or "").strip()
     scope = (payload.get("scope") or "").strip().lower()
     name = (payload.get("name") or "").strip()
+
+    if req_path:
+        print("[DATASET_REVERT] requested path=" + str(req_path))
+    elif img_id:
+        print("[DATASET_REVERT] requested id=" + str(img_id))
 
     if img_id and (":" in img_id) and (not scope or not name):
         try:
@@ -1953,21 +1962,45 @@ def api_revert_classification():
         except Exception:
             pass
 
+    src: str | None = None
+    if req_path and (not scope or not name):
+        try:
+            full = _safe_join(os.path.abspath(DATASET_TRAINING_ROOT), req_path)
+        except Exception:
+            return jsonify({"status": "error", "message": "Ruta inválida."}), 400
+        full_abs = os.path.abspath(full)
+        neg_abs = os.path.abspath(DATASET_NEGATIVE_DIR)
+        pos_abs = os.path.abspath(DATASET_POSITIVE_PENDING_DIR)
+        if full_abs.startswith(neg_abs + os.sep):
+            scope = "negative"
+            name = os.path.basename(full_abs)
+            src = full_abs
+        elif full_abs.startswith(pos_abs + os.sep):
+            scope = "positive"
+            name = os.path.basename(full_abs)
+            src = full_abs
+        else:
+            return jsonify({"status": "error", "message": "Ruta fuera de directorios permitidos."}), 400
+
     if scope not in {"negative", "positive"} or not name:
         return jsonify({"status": "error", "message": "Identificador invÃ¡lido."}), 400
 
-    src_dir = DATASET_NEGATIVE_DIR if scope == "negative" else DATASET_POSITIVE_PENDING_DIR
-    src = os.path.join(src_dir, name)
+    if src is None:
+        src_dir = DATASET_NEGATIVE_DIR if scope == "negative" else DATASET_POSITIVE_PENDING_DIR
+        src = os.path.join(src_dir, name)
     if not os.path.exists(src) or not os.path.isfile(src):
         return jsonify({"status": "error", "message": "Imagen no encontrada."}), 404
 
     dest = _unique_dest_path(DATASET_LIMPIAS_INBOX_DIR, name)
+    print("[DATASET_REVERT] src=" + str(src))
+    print("[DATASET_REVERT] dst=" + str(dest))
     try:
         shutil.move(src, dest)
     except Exception as e:
+        print("[DATASET_REVERT][ERROR]", str(e) or e.__class__.__name__)
         return jsonify({"status": "error", "message": f"No se pudo revertir: {str(e)}"}), 500
 
-    return jsonify({"status": "success"}), 200
+    return jsonify({"status": "success", "moved_to": dest}), 200
 
 # ======================== STREAM + STATUS ========================
 @app.route("/video_feed")
@@ -2217,6 +2250,41 @@ def ptz_stop():
         inspection_mode_enabled = False
     ptz_worker.enqueue_stop()
     return jsonify({"ok": True})
+
+
+@app.post("/api/inspection_test_move")
+@login_required
+@role_required("operator")
+def api_inspection_test_move():
+    """
+    Movimiento de prueba (automático directo) sin pasar por el worker de inspección.
+    Útil para diagnosticar si el problema está en el worker/cola o en el control ONVIF.
+    """
+    configured_ptz = bool(is_camera_configured_ptz())
+    ptz_capable = bool(_ptz_discovered_capable())
+    ready = bool(is_ptz_ready_for_manual())
+    print("[PTZ_READY]", f"manual={bool(ready)} configured={bool(configured_ptz)} discovered={bool(ptz_capable)}")
+    if not ready:
+        return jsonify({"ok": False, "error": "PTZ manual bloqueado: la cámara no está configurada como PTZ"}), 403
+
+    try:
+        with app.app_context():
+            cfg = get_or_create_camera_config()
+            host = (cfg.onvif_host or "").strip()
+            username = (cfg.onvif_username or "").strip()
+            password = (cfg.onvif_password or "").strip()
+            port = _normalized_onvif_port(cfg.onvif_port)
+        if not host:
+            return jsonify({"ok": False, "error": "ONVIF_HOST no configurado."}), 400
+        if not username or not password:
+            return jsonify({"ok": False, "error": "Credenciales ONVIF incompletas."}), 400
+        ctrl = PTZController(host=host, port=int(port), username=username, password=password)
+        ctrl.continuous_move(x=0.25, y=0.0, zoom=0.0, duration_s=2.0)
+        return jsonify({"ok": True})
+    except Exception as e:
+        msg = str(e) or e.__class__.__name__
+        print(f"[PTZ_WORKER][ERROR] source=inspection_test error={msg}")
+        return jsonify({"ok": False, "error": msg}), 500
 
 @app.route("/video_progress")
 @login_required
