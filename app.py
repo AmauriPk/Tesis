@@ -425,6 +425,8 @@ last_confirmed_detection_at: float | None = None
 _last_camera_cfg_is_ptz: bool | None = None
 _onvif_last_probe_at: float | None = None
 _onvif_last_probe_error: str | None = None
+_last_ptz_ready_automation: bool | None = None
+_last_ptz_ready_manual: bool | None = None
 
 current_detection_state = {
     "status": "Zona despejada",
@@ -621,22 +623,18 @@ class _InspectionPatrolWorker:
                 self._last_sent = None
                 continue
             now = time.time()
-            x_speed = float(0.08) * float(self._dir)
+            x_speed = float(0.12) * float(self._dir)
 
             if paused_by_detection:
                 if self._patrolling and not self._stop_sent_in_pause:
                     ptz_worker.enqueue_stop()
                     self._stop_sent_in_pause = True
+                    print("[INSPECTION_CMD]", "phase=stop paused_by_detection=True")
                 self._patrolling = False
                 self._segment_started_at = None
                 self._phase = "move"
                 self._next_action_at = 0.0
                 self._last_sent = None
-                print(
-                    "[INSPECTION_CMD]",
-                    f"enabled={bool(enabled)} ready={bool(ptz_ok)} direction={'right' if self._dir > 0 else 'left'} "
-                    f"x={abs(float(x_speed)):.2f} paused={bool(paused_by_detection)}",
-                )
                 continue
 
             self._stop_sent_in_pause = False
@@ -647,39 +645,40 @@ class _InspectionPatrolWorker:
                 self._next_action_at = 0.0
                 self._last_sent = None
 
-            # Cambiar direcciÃ³n cada 8 segundos.
-            if (now - float(self._segment_started_at)) >= 8.0:
-                self._dir = -1.0 * float(self._dir)
-                self._segment_started_at = now
-
-            x_speed = float(0.08) * float(self._dir)
-
             if float(self._next_action_at) > 0.0 and now < float(self._next_action_at):
                 continue
 
+            phase = str(self._phase)
             last = self._last_sent
-            sig = (str(self._phase), float(self._dir))
+            sig = (phase, float(self._dir))
             if last is not None and (last[0], last[1]) == sig:
                 continue
 
-            if str(self._phase) == "move":
-                ptz_worker.enqueue_move(x=float(x_speed), y=0.0, zoom=0.0, duration_s=0.35, source="inspection")
+            if phase == "move":
+                ptz_worker.enqueue_move(x=float(x_speed), y=0.0, zoom=0.0, duration_s=2.0, source="inspection")
                 self._patrolling = True
-                self._phase = "stop_wait"
-                self._next_action_at = now + 0.35
-            else:
-                if self._patrolling:
-                    ptz_worker.enqueue_stop()
+                self._phase = "wait_stop"
+                self._next_action_at = now + 2.0
+                print(
+                    "[INSPECTION_CMD]",
+                    f"phase=move direction={'right' if self._dir > 0 else 'left'} x={abs(float(x_speed)):.2f} duration=2.0",
+                )
+            elif phase == "wait_stop":
+                ptz_worker.enqueue_stop()
                 self._patrolling = False
+                self._phase = "wait_pause"
+                self._next_action_at = now + 0.5
+                print("[INSPECTION_CMD]", "phase=stop")
+            else:  # wait_pause
+                self._dir = -1.0 * float(self._dir)
                 self._phase = "move"
-                self._next_action_at = now + 0.50
+                self._next_action_at = 0.0
+                print(
+                    "[INSPECTION_CMD]",
+                    f"phase=pause_done next_direction={'right' if self._dir > 0 else 'left'}",
+                )
 
-            self._last_sent = (str(sig[0]), float(sig[1]))
-            print(
-                "[INSPECTION_CMD]",
-                f"enabled={bool(enabled)} ready={bool(ptz_ok)} direction={'right' if self._dir > 0 else 'left'} "
-                f"x={abs(float(x_speed)):.2f} paused={bool(paused_by_detection)}",
-            )
+            self._last_sent = (str(self._phase), float(self._dir))
 inspection_worker = _InspectionPatrolWorker(idle_s=10.0)
 inspection_worker.start()
 
@@ -2053,13 +2052,7 @@ def api_auto_tracking():
         enabled_txt = (request.form.get("enabled") or "").strip().lower()
         enabled = enabled_txt in {"1", "true", "t", "yes", "y", "on"}
 
-    ptz_capable = bool(_ptz_discovered_capable())
-    configured_ptz = bool(is_camera_configured_ptz())
     ready_auto = bool(is_ptz_ready_for_automation())
-    print(
-        "[PTZ_READY]",
-        f"automation={bool(ready_auto)} configured={bool(configured_ptz)} discovered={bool(ptz_capable)}",
-    )
     with state_lock:
         auto_tracking_enabled = bool(enabled) and bool(ready_auto)
         disabled = not bool(enabled)
@@ -2082,13 +2075,7 @@ def api_inspection_mode():
     payload = request.get_json(silent=True) or {}
     enabled = bool(payload.get("enabled"))
 
-    ptz_capable = bool(_ptz_discovered_capable())
-    configured_ptz = bool(is_camera_configured_ptz())
     ready_auto = bool(is_ptz_ready_for_automation())
-    print(
-        "[PTZ_READY]",
-        f"automation={bool(ready_auto)} configured={bool(configured_ptz)} discovered={bool(ptz_capable)}",
-    )
     with state_lock:
         if enabled:
             inspection_mode_enabled = bool(enabled) and bool(ready_auto)
@@ -2118,16 +2105,41 @@ def _ptz_discovered_capable() -> bool:
     with state_lock:
         return bool(is_ptz_capable)
 
+def _should_log_ptz_ready() -> bool:
+    v = (os.environ.get("DEBUG_PTZ_READY") or "").strip().lower()
+    return v in {"1", "true", "t", "yes", "y", "on"}
+
+
+def _log_ptz_ready(*, kind: str, ready: bool, configured: bool, discovered: bool) -> None:
+    global _last_ptz_ready_automation, _last_ptz_ready_manual
+    if _should_log_ptz_ready():
+        print("[PTZ_READY]", f"{kind}={bool(ready)} configured={bool(configured)} discovered={bool(discovered)}")
+        return
+    if str(kind) == "automation":
+        if _last_ptz_ready_automation is None or bool(_last_ptz_ready_automation) != bool(ready):
+            _last_ptz_ready_automation = bool(ready)
+            print("[PTZ_READY]", f"automation={bool(ready)} configured={bool(configured)} discovered={bool(discovered)}")
+        return
+    if str(kind) == "manual":
+        if _last_ptz_ready_manual is None or bool(_last_ptz_ready_manual) != bool(ready):
+            _last_ptz_ready_manual = bool(ready)
+            print("[PTZ_READY]", f"manual={bool(ready)} configured={bool(configured)} discovered={bool(discovered)}")
+        return
+
 
 def is_ptz_ready_for_manual() -> bool:
-    return bool(is_camera_configured_ptz() or _ptz_discovered_capable())
+    configured_ptz = bool(is_camera_configured_ptz())
+    discovered = bool(_ptz_discovered_capable())
+    ready = bool(configured_ptz or discovered)
+    _log_ptz_ready(kind="manual", ready=ready, configured=configured_ptz, discovered=discovered)
+    return bool(ready)
 
 
 def is_ptz_ready_for_automation() -> bool:
     configured_ptz = bool(is_camera_configured_ptz())
     discovered = bool(_ptz_discovered_capable())
     ready = bool(configured_ptz or discovered)
-    print("[PTZ_READY]", f"automation={bool(ready)} configured={bool(configured_ptz)} discovered={bool(discovered)}")
+    _log_ptz_ready(kind="automation", ready=ready, configured=configured_ptz, discovered=discovered)
     return bool(ready)
 
 @app.post("/ptz_move")

@@ -64,8 +64,9 @@
       col.querySelectorAll("button[data-action]").forEach((b) => {
         b.addEventListener("click", async () => {
           clearAlerts();
-          const prevTxt = b.textContent;
-          b.disabled = true;
+          const buttons = Array.from(col.querySelectorAll("button[data-action]"));
+          const prevTxtByBtn = new Map(buttons.map((btn) => [btn, btn.textContent]));
+          buttons.forEach((btn) => (btn.disabled = true));
           b.textContent = "Procesando...";
           try {
             await fetchJson("/api/classify_image", {
@@ -78,10 +79,17 @@
               grid.innerHTML = `<div class="text-secondary">Sin elementos.</div>`;
             }
             console.log("[DATASET] imagen clasificada y retirada de la vista");
+            try {
+              await loadHistory();
+            } catch (_) {
+              // no-op
+            }
           } catch (e) {
             setAlert("datasetErr", e?.data?.message || e?.data?.error || "Error");
-            b.disabled = false;
-            b.textContent = prevTxt;
+            buttons.forEach((btn) => {
+              btn.disabled = false;
+              btn.textContent = prevTxtByBtn.get(btn) || btn.textContent;
+            });
           }
         });
       });
