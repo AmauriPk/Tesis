@@ -64,57 +64,131 @@
     }
   };
 
-  const renderAlerts = (alerts) => {
-    const body = byId("recentAlertsBody");
-    if (!body) return;
-    body.innerHTML = "";
+  let alertsViewMode = "events"; // events | raw
 
-    const items = alerts || [];
-    if (!items.length) {
-      body.innerHTML = `<tr><td colspan="5" class="text-secondary">Sin alertas.</td></tr>`;
-      return;
-    }
-
-    for (const a of items) {
-      const tr = document.createElement("tr");
-      const id = a.id ?? "-";
-      const ts = a.timestamp || a.timestamp_iso || "-";
-      const conf = Number(a.confidence || 0);
-      const bbox = [a.x1, a.y1, a.x2, a.y2].every((x) => x !== undefined && x !== null)
-        ? `${a.x1},${a.y1},${a.x2},${a.y2}`
-        : "-";
-
-      const imgPath = a.image_path ? String(a.image_path) : "";
-      const btn = imgPath
-        ? `<button class="btn btn-sm btn-outline-warning" data-img="${imgPath}" data-conf="${conf}">Ver</button>`
-        : `<span class="text-secondary">-</span>`;
-
-      tr.innerHTML = `
-        <td class="mono">${id}</td>
-        <td class="mono">${ts}</td>
-        <td class="mono">${fmtPct(conf)}</td>
-        <td class="mono">${bbox}</td>
-        <td>${btn}</td>
-      `;
-      body.appendChild(tr);
-    }
-
-    body.querySelectorAll("button[data-img]").forEach((b) => {
+  const bindEvidenceButtons = (rootEl) => {
+    (rootEl || document).querySelectorAll("button[data-img-url]").forEach((b) => {
       b.addEventListener("click", () => {
         const img = byId("evidenceImage");
         const meta = byId("evidenceMeta");
         const modalEl = byId("evidenceModal");
         if (!img || !modalEl) return;
-        img.src = `/${b.dataset.img}`.replaceAll("//", "/");
+        img.src = String(b.dataset.imgUrl || "").replaceAll("//", "/");
         if (meta) meta.textContent = `Confianza: ${fmtPct(b.dataset.conf)}`;
         if (window.bootstrap?.Modal) new window.bootstrap.Modal(modalEl).show();
       });
     });
   };
 
+  const renderEventAlerts = (events) => {
+    const body = byId("recentAlertsBody");
+    if (!body) return;
+    body.innerHTML = "";
+
+    const items = events || [];
+    if (!items.length) {
+      body.innerHTML = `<tr><td colspan="7" class="text-secondary">Sin alertas.</td></tr>`;
+      return;
+    }
+
+    for (const ev of items) {
+      const tr = document.createElement("tr");
+      const id = ev.id ?? "-";
+      const started = ev.started_at || "-";
+      const ended = ev.ended_at || "-";
+      const conf = Number(ev.max_confidence || 0);
+      const count = Number(ev.detection_count || 0);
+      const bbox = ev.best_bbox || "-";
+
+      const imgUrl = ev.best_evidence_url ? String(ev.best_evidence_url) : "";
+      const thumb = imgUrl
+        ? `<img src="${imgUrl}" alt="evidencia" style="max-width:80px;max-height:60px;object-fit:cover;border-radius:6px" />`
+        : `<span class="text-secondary">-</span>`;
+      const btn = imgUrl
+        ? `<button class="btn btn-sm btn-outline-warning ms-2" data-img-url="${imgUrl}" data-conf="${conf}">Ver</button>`
+        : ``;
+
+      tr.innerHTML = `
+        <td class="mono">${id}</td>
+        <td class="mono">${started}</td>
+        <td class="mono">${ended}</td>
+        <td class="mono">${fmtPct(conf)}</td>
+        <td class="mono">${count}</td>
+        <td class="mono">${bbox}</td>
+        <td>${thumb}${btn}</td>
+      `;
+      body.appendChild(tr);
+    }
+
+    bindEvidenceButtons(body);
+  };
+
+  const renderRawAlerts = (alerts) => {
+    const body = byId("recentAlertsBody");
+    if (!body) return;
+    body.innerHTML = "";
+
+    const items = alerts || [];
+    if (!items.length) {
+      body.innerHTML = `<tr><td colspan="7" class="text-secondary">Sin alertas.</td></tr>`;
+      return;
+    }
+
+    for (const a of items) {
+      const tr = document.createElement("tr");
+      const id = a.id ?? "-";
+      const started = a.timestamp || a.timestamp_iso || "-";
+      const ended = "-";
+      const conf = Number(a.confidence || 0);
+      const count = "-";
+      const bbox = a.bbox_text
+        ? String(a.bbox_text)
+        : Array.isArray(a.bbox) && a.bbox.every((x) => x !== undefined && x !== null)
+          ? `${a.bbox[0]},${a.bbox[1]},${a.bbox[2]},${a.bbox[3]}`
+          : "-";
+
+      const imgUrl =
+        a.evidence_url ||
+        a.image_url ||
+        (a.image_path ? `/${String(a.image_path).replaceAll("\\", "/")}` : "");
+      const thumb = imgUrl
+        ? `<img src="${imgUrl}" alt="evidencia" style="max-width:80px;max-height:60px;object-fit:cover;border-radius:6px" />`
+        : `<span class="text-secondary">-</span>`;
+      const btn = imgUrl
+        ? `<button class="btn btn-sm btn-outline-warning ms-2" data-img-url="${imgUrl}" data-conf="${conf}">Ver</button>`
+        : ``;
+
+      tr.innerHTML = `
+        <td class="mono">${id}</td>
+        <td class="mono">${started}</td>
+        <td class="mono">${ended}</td>
+        <td class="mono">${fmtPct(conf)}</td>
+        <td class="mono">${count}</td>
+        <td class="mono">${bbox}</td>
+        <td>${thumb}${btn}</td>
+      `;
+      body.appendChild(tr);
+    }
+
+    bindEvidenceButtons(body);
+  };
+
   const updateAlerts = async () => {
+    if (alertsViewMode === "raw") {
+      const data = await fetchJson("/api/recent_alerts?limit=15");
+      renderRawAlerts(data.alerts || []);
+      return;
+    }
+
+    const ev = await fetchJson("/api/recent_detection_events?limit=15");
+    const events = ev.events || [];
+    if (events.length) {
+      renderEventAlerts(events);
+      return;
+    }
+
     const data = await fetchJson("/api/recent_alerts?limit=15");
-    renderAlerts(data.alerts || []);
+    renderRawAlerts(data.alerts || []);
   };
 
   const updateCameraUi = async () => {
@@ -438,6 +512,14 @@
   };
 
   const boot = async () => {
+    byId("btnAlertsEvents")?.addEventListener("click", () => {
+      alertsViewMode = "events";
+      updateAlerts().catch(() => null);
+    });
+    byId("btnAlertsRaw")?.addEventListener("click", () => {
+      alertsViewMode = "raw";
+      updateAlerts().catch(() => null);
+    });
     bindPtz();
     bindManual();
 

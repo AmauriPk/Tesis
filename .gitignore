@@ -12,6 +12,7 @@ dataset_entrenamiento/
 # Ignorar solo los resultados y evidencias, pero conservar la interfaz (static/)
 static/results/
 static/evidencia/
+static/evidence/
 static/capturas/
 static/top_detections/
 

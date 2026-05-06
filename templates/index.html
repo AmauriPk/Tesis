@@ -270,24 +270,34 @@
                                 <i class="fa-solid fa-table-list"></i> Alertas Recientes
                             </div>
                             <div class="card-body">
+                                <div class="d-flex gap-2 mb-2">
+                                    <button class="btn btn-sm btn-outline-info" id="btnAlertsEvents" type="button">
+                                        Eventos
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" id="btnAlertsRaw" type="button">
+                                        Ver registros técnicos
+                                    </button>
+                                </div>
                                 <div class="table-responsive">
                                     <table class="table table-dark table-hover table-sm align-middle mb-0">
                                         <thead>
                                             <tr>
                                                 <th>ID</th>
-                                                <th>Hora</th>
-                                                <th>Conf.</th>
+                                                <th>Inicio</th>
+                                                <th>Fin</th>
+                                                <th>Conf. máx</th>
+                                                <th>Detecciones</th>
                                                 <th>BBox</th>
                                                 <th>Evidencia</th>
                                             </tr>
                                         </thead>
                                         <tbody id="recentAlertsBody">
-                                            <tr><td colspan="5" class="text-secondary">Sin alertas.</td></tr>
+                                            <tr><td colspan="7" class="text-secondary">Sin alertas.</td></tr>
                                         </tbody>
                                     </table>
                                 </div>
                                 <div class="form-text mt-2">
-                                    Actualización automática. Modelo de visión activo.
+                                    Actualización automática. Por defecto se muestran eventos agrupados.
                                 </div>
                             </div>
                         </div>

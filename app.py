@@ -105,6 +105,12 @@ os.makedirs(app.config["RESULTS_FOLDER"], exist_ok=True)
 os.makedirs(app.config["TOP_DETECTIONS_FOLDER"], exist_ok=True)
 os.makedirs(app.config["DATASET_RECOLECCION_FOLDER"], exist_ok=True)
 
+# Evidencia eficiente (UI de alertas recientes)
+EVIDENCE_DIR = (os.environ.get("EVIDENCE_DIR") or os.path.join("static", "evidence")).strip() or os.path.join(
+    "static", "evidence"
+)
+os.makedirs(EVIDENCE_DIR, exist_ok=True)
+
 # Dataset para mejora continua / reentrenamiento (Admin).
 DATASET_TRAINING_ROOT = os.environ.get("DATASET_TRAINING_ROOT", "dataset_entrenamiento")
 DATASET_NEGATIVE_DIR = os.path.join(DATASET_TRAINING_ROOT, "train", "images")
@@ -261,6 +267,414 @@ _metrics_writer = MetricsDBWriter(
     STORAGE_CONFIG.get("db_path", "detections.db"),
     enabled=(os.environ.get("METRICS_LOGGING", "1").strip().lower() not in {"0", "false", "no", "off"}),
 )
+
+def _get_metrics_db_path_abs() -> str:
+    db_path = STORAGE_CONFIG.get("db_path", "detections.db")
+    db_path = str(db_path or "detections.db")
+    if db_path and not os.path.isabs(db_path):
+        db_path = os.path.join(app.root_path, db_path)
+    return db_path
+
+
+def _parse_iso_ts_to_epoch(ts_iso: str | None) -> float | None:
+    if not ts_iso:
+        return None
+    try:
+        return float(datetime.fromisoformat(str(ts_iso)).timestamp())
+    except Exception:
+        return None
+
+
+def _ensure_detection_events_schema(con: sqlite3.Connection) -> None:
+    con.execute("PRAGMA foreign_keys=ON;")
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS detection_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            max_confidence REAL,
+            detection_count INTEGER,
+            best_bbox_text TEXT,
+            best_evidence_path TEXT,
+            status TEXT,
+            source TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+    con.commit()
+
+
+class DetectionEventWriter:
+    """
+    Agrupa detecciones confirmadas en eventos (para UI defendible y eficiente).
+
+    Importante: NO corre dentro del hilo de video/inferencia. Consume una cola.
+    """
+
+    def __init__(self, db_path: str, *, enabled: bool = True, gap_seconds: float = 3.0) -> None:
+        self.db_path = str(db_path)
+        self.enabled = bool(enabled)
+        self.gap_seconds = float(gap_seconds)
+        self._q: queue.Queue[FrameRecord] = queue.Queue(maxsize=5000)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+        self._active_event_id: int | None = None
+        self._active_started_iso: str | None = None
+        self._active_last_epoch: float | None = None
+        self._active_last_iso: str | None = None
+        self._active_max_conf: float = 0.0
+        self._active_count: int = 0
+        self._active_best_bbox_text: str | None = None
+        self._active_best_evidence_path: str | None = None
+        self._last_event_log_at: float = 0.0
+
+        if self.enabled:
+            try:
+                os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+            except Exception:
+                pass
+            self._thread.start()
+
+    def stop(self, *, timeout_s: float = 2.0) -> None:
+        if not self.enabled:
+            return
+        self._stop.set()
+        self._thread.join(timeout=float(timeout_s))
+
+    def enqueue(self, record: FrameRecord) -> None:
+        if not self.enabled:
+            return
+        try:
+            self._q.put_nowait(record)
+        except queue.Full:
+            return
+
+    def _connect(self) -> sqlite3.Connection:
+        con = sqlite3.connect(self.db_path, timeout=30, check_same_thread=False)
+        try:
+            con.execute("PRAGMA journal_mode=WAL;")
+            con.execute("PRAGMA synchronous=NORMAL;")
+        except Exception:
+            pass
+        _ensure_detection_events_schema(con)
+        return con
+
+    def _close_active_event(self, con: sqlite3.Connection) -> None:
+        if self._active_event_id is None:
+            return
+        ended_at = self._active_last_iso or datetime.now().isoformat()
+        now_iso = datetime.now().isoformat()
+        try:
+            con.execute(
+                """
+                UPDATE detection_events
+                SET ended_at=?, max_confidence=?, detection_count=?, best_bbox_text=?, best_evidence_path=?,
+                    status='closed', updated_at=?
+                WHERE id=?
+                """,
+                (
+                    ended_at,
+                    float(self._active_max_conf),
+                    int(self._active_count),
+                    self._active_best_bbox_text,
+                    self._active_best_evidence_path,
+                    now_iso,
+                    int(self._active_event_id),
+                ),
+            )
+            con.commit()
+            print(f"[EVENT] closed id={int(self._active_event_id)}")
+        except Exception as e:
+            print(f"[EVENT][ERROR] close_failed id={self._active_event_id} err={e}")
+        finally:
+            self._active_event_id = None
+            self._active_started_iso = None
+            self._active_last_epoch = None
+            self._active_last_iso = None
+            self._active_max_conf = 0.0
+            self._active_count = 0
+            self._active_best_bbox_text = None
+            self._active_best_evidence_path = None
+
+    def _create_new_event(self, con: sqlite3.Connection, *, started_at: str, source: str | None) -> None:
+        now_iso = datetime.now().isoformat()
+        try:
+            cur = con.cursor()
+            cur.execute(
+                """
+                INSERT INTO detection_events
+                (started_at, ended_at, max_confidence, detection_count, best_bbox_text, best_evidence_path, status, source, created_at, updated_at)
+                VALUES (?, NULL, 0.0, 0, NULL, NULL, 'open', ?, ?, ?)
+                """,
+                (str(started_at), (str(source) if source else None), now_iso, now_iso),
+            )
+            con.commit()
+            self._active_event_id = int(cur.lastrowid)
+            self._active_started_iso = str(started_at)
+            self._active_last_iso = str(started_at)
+            self._active_last_epoch = _parse_iso_ts_to_epoch(str(started_at)) or time.time()
+            self._active_max_conf = 0.0
+            self._active_count = 0
+            self._active_best_bbox_text = None
+            self._active_best_evidence_path = None
+            print(f"[EVENT] created id={int(self._active_event_id)}")
+        except Exception as e:
+            print(f"[EVENT][ERROR] create_failed err={e}")
+            self._active_event_id = None
+
+    def _update_active_event(
+        self,
+        con: sqlite3.Connection,
+        *,
+        ts_iso: str,
+        ts_epoch: float,
+        detections: list[dict],
+    ) -> None:
+        if self._active_event_id is None:
+            return
+
+        frame_best_det = None
+        frame_best_conf = 0.0
+        for d in detections or []:
+            if not isinstance(d, dict):
+                continue
+            try:
+                c = float(d.get("confidence") or 0.0)
+            except Exception:
+                c = 0.0
+            if c >= frame_best_conf:
+                frame_best_conf = c
+                frame_best_det = d
+
+        self._active_last_iso = str(ts_iso)
+        self._active_last_epoch = float(ts_epoch)
+        self._active_count += max(1, int(len(detections or [])))
+        max_conf_improved = False
+        if float(frame_best_conf) >= float(self._active_max_conf):
+            if float(frame_best_conf) > float(self._active_max_conf) + 1e-9:
+                max_conf_improved = True
+            self._active_max_conf = float(frame_best_conf)
+            # Best bbox
+            try:
+                bb = frame_best_det.get("bbox") if isinstance(frame_best_det, dict) else None
+                if bb and len(bb) == 4:
+                    x1, y1, x2, y2 = [int(v) for v in bb]
+                    self._active_best_bbox_text = f"{x1},{y1},{x2},{y2}"
+            except Exception:
+                pass
+            # Best evidence path (si existe)
+            try:
+                p = frame_best_det.get("image_path") if isinstance(frame_best_det, dict) else None
+                if p:
+                    self._active_best_evidence_path = str(p).replace("\\", "/")
+            except Exception:
+                pass
+
+        now_iso = datetime.now().isoformat()
+        try:
+            con.execute(
+                """
+                UPDATE detection_events
+                SET ended_at=?, max_confidence=?, detection_count=?, best_bbox_text=?, best_evidence_path=?,
+                    status='open', updated_at=?
+                WHERE id=?
+                """,
+                (
+                    str(ts_iso),
+                    float(self._active_max_conf),
+                    int(self._active_count),
+                    self._active_best_bbox_text,
+                    self._active_best_evidence_path,
+                    now_iso,
+                    int(self._active_event_id),
+                ),
+            )
+            con.commit()
+            now = time.time()
+            if max_conf_improved or (now - float(self._last_event_log_at)) > 2.0:
+                print(f"[EVENT] updated id={int(self._active_event_id)} max_conf={float(self._active_max_conf):.3f}")
+                self._last_event_log_at = now
+        except Exception as e:
+            print(f"[EVENT][ERROR] update_failed id={self._active_event_id} err={e}")
+
+    def _run(self) -> None:
+        con: sqlite3.Connection | None = None
+        try:
+            con = self._connect()
+            # Backfill ligero: si no hay eventos todavía, crear algunos desde detections_v2
+            try:
+                cur = con.cursor()
+                cur.execute("SELECT COUNT(1) FROM detection_events")
+                n_events = int(cur.fetchone()[0] or 0)
+            except Exception:
+                n_events = 0
+            if n_events == 0:
+                try:
+                    self._backfill_from_detections(con)
+                except Exception as e:
+                    print(f"[EVENT][WARN] backfill_failed err={e}")
+            while not self._stop.is_set():
+                try:
+                    rec = self._q.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+                try:
+                    if not getattr(rec, "confirmed", False):
+                        continue
+                    ts_iso = str(getattr(rec, "timestamp_iso", "") or "")
+                    ts_epoch = _parse_iso_ts_to_epoch(ts_iso) or time.time()
+                    if self._active_last_epoch is not None and (ts_epoch - float(self._active_last_epoch)) > float(
+                        self.gap_seconds
+                    ):
+                        self._close_active_event(con)
+                    if self._active_event_id is None:
+                        self._create_new_event(con, started_at=ts_iso or datetime.now().isoformat(), source=rec.source)
+                    self._update_active_event(con, ts_iso=ts_iso or datetime.now().isoformat(), ts_epoch=ts_epoch, detections=list(rec.detections or []))
+                except Exception as e:
+                    print(f"[EVENT][ERROR] run_loop err={e}")
+        finally:
+            try:
+                if con is not None:
+                    con.close()
+            except Exception:
+                pass
+
+    def _backfill_from_detections(self, con: sqlite3.Connection) -> None:
+        """
+        Construye eventos a partir de detections_v2 existentes (solo una vez si la tabla está vacía).
+        Mantiene el costo acotado leyendo solo las filas más recientes.
+        """
+        gap_s = float(self.gap_seconds)
+        try:
+            backfill_limit = int(_env_int("EVENT_BACKFILL_LIMIT", 2000))
+        except Exception:
+            backfill_limit = 2000
+        backfill_limit = max(200, min(20000, int(backfill_limit)))
+
+        cur = con.cursor()
+        # Verifica tabla fuente
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = {str(r[0]) for r in (cur.fetchall() or [])}
+        if "detections_v2" not in tables:
+            return
+
+        # Trae las más recientes y las procesa en orden cronológico
+        cur.execute(
+            """
+            SELECT id, timestamp, confidence, x1, y1, x2, y2, image_path, source, confirmed
+            FROM detections_v2
+            WHERE confirmed = 1
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (backfill_limit,),
+        )
+        rows = list(cur.fetchall() or [])
+        if not rows:
+            return
+        rows.reverse()
+
+        active_id = None
+        last_epoch = None
+        last_iso = None
+        max_conf = 0.0
+        count = 0
+        best_bbox = None
+        best_img = None
+
+        def _flush_close() -> None:
+            nonlocal active_id
+            if active_id is None:
+                return
+            now_iso = datetime.now().isoformat()
+            con.execute(
+                """
+                UPDATE detection_events
+                SET ended_at=?, max_confidence=?, detection_count=?, best_bbox_text=?, best_evidence_path=?,
+                    status='closed', updated_at=?
+                WHERE id=?
+                """,
+                (last_iso, float(max_conf), int(count), best_bbox, best_img, now_iso, int(active_id)),
+            )
+            con.commit()
+            active_id = None
+
+        for r in rows:
+            ts_iso = str(r["timestamp"] or "")
+            ts_epoch = _parse_iso_ts_to_epoch(ts_iso) or time.time()
+            if last_epoch is not None and (ts_epoch - float(last_epoch)) > gap_s:
+                _flush_close()
+            if active_id is None:
+                now_iso = datetime.now().isoformat()
+                cur2 = con.cursor()
+                cur2.execute(
+                    """
+                    INSERT INTO detection_events
+                    (started_at, ended_at, max_confidence, detection_count, best_bbox_text, best_evidence_path, status, source, created_at, updated_at)
+                    VALUES (?, NULL, 0.0, 0, NULL, NULL, 'open', ?, ?, ?)
+                    """,
+                    (ts_iso or datetime.now().isoformat(), (r["source"] or None), now_iso, now_iso),
+                )
+                con.commit()
+                active_id = int(cur2.lastrowid)
+                max_conf = 0.0
+                count = 0
+                best_bbox = None
+                best_img = None
+
+            last_epoch = ts_epoch
+            last_iso = ts_iso or last_iso or datetime.now().isoformat()
+            count += 1
+            try:
+                conf = float(r["confidence"] or 0.0)
+            except Exception:
+                conf = 0.0
+            if conf >= max_conf:
+                max_conf = conf
+                try:
+                    x1, y1, x2, y2 = int(r["x1"]), int(r["y1"]), int(r["x2"]), int(r["y2"])
+                    best_bbox = f"{x1},{y1},{x2},{y2}"
+                except Exception:
+                    pass
+                try:
+                    p = r["image_path"] or None
+                    if p:
+                        best_img = str(p).replace("\\", "/")
+                except Exception:
+                    pass
+
+            now_iso = datetime.now().isoformat()
+            con.execute(
+                """
+                UPDATE detection_events
+                SET ended_at=?, max_confidence=?, detection_count=?, best_bbox_text=?, best_evidence_path=?,
+                    status='open', updated_at=?
+                WHERE id=?
+                """,
+                (last_iso, float(max_conf), int(count), best_bbox, best_img, now_iso, int(active_id)),
+            )
+            con.commit()
+
+        _flush_close()
+        print(f"[EVENT] backfill done events_ready=1 rows={len(rows)}")
+
+
+_event_writer = DetectionEventWriter(
+    _get_metrics_db_path_abs(),
+    enabled=(
+        os.environ.get("METRICS_LOGGING", "1").strip().lower() not in {"0", "false", "no", "off"}
+    ),
+    gap_seconds=float(_env_float("EVENT_GAP_SECONDS", 3.0)),
+)
+
+
+def _metrics_enqueue_with_events(record: FrameRecord) -> None:
+    _metrics_writer.enqueue(record)
+    _event_writer.enqueue(record)
 
 yolo_model = load_yolo_model()
 
@@ -1344,7 +1758,7 @@ live_reader = RTSPLatestFrameReader(
 live_deps = LiveStreamDeps(
     video_config=VIDEO_CONFIG,
     yolo_config=YOLO_CONFIG,
-    detections_folder_rel=str(app.config.get("TOP_DETECTIONS_FOLDER", os.path.join("static", "top_detections"))),
+    detections_folder_rel=str(EVIDENCE_DIR),
     app_root_path=str(app.root_path),
 )
 
@@ -1360,7 +1774,7 @@ live_processor = LiveVideoProcessor(
     model=yolo_model,
     deps=live_deps,
     get_model_params=get_model_params,
-    metrics_enqueue=_metrics_writer.enqueue,
+    metrics_enqueue=_metrics_enqueue_with_events,
     make_frame_record=FrameRecord,
     get_camera_mode=lambda: str(camera_source_mode),
     is_tracking_enabled=lambda: bool(auto_tracking_enabled) and bool(is_ptz_ready_for_automation()),
@@ -1881,6 +2295,7 @@ def api_recent_alerts():
                 # - Si viene absoluta dentro del proyecto => convertir a relativa
                 # - Si no se puede mapear => ""
                 image_url = ""
+                image_path_rel = ""
                 try:
                     raw = (str(image_path).strip() if image_path else "") or ""
                     if raw:
@@ -1898,18 +2313,32 @@ def api_recent_alerts():
                         if p:
                             p = p.lstrip("/")
                             image_url = "/" + p
+                            image_path_rel = p
                 except Exception:
                     image_url = ""
+                    image_path_rel = ""
+
+                bbox_text = "-"
+                if x1 is not None and y1 is not None and x2 is not None and y2 is not None:
+                    bbox_text = f"{int(x1)},{int(y1)},{int(x2)},{int(y2)}"
                 alerts.append(
                     {
                         "id": int(r["id"]) if r["id"] is not None else None,
                         "timestamp": r["timestamp"],
                         "confidence": float(r["confidence"]) if r["confidence"] is not None else None,
                         "bbox": [x1, y1, x2, y2],
+                        "x1": x1,
+                        "y1": y1,
+                        "x2": x2,
+                        "y2": y2,
+                        "bbox_text": bbox_text,
                         "class_name": r["class_name"],
                         "source": r["source"],
                         "camera_mode": r["camera_mode"],
+                        # Compat frontend: `image_path` (relativo, sin slash inicial) y `image_url`.
+                        "image_path": image_path_rel,
                         "image_url": image_url,
+                        "evidence_url": image_url,
                     }
                 )
             print(f"[ALERTS] db={db_path} table={using_table} rows={len(alerts)}")
@@ -1923,6 +2352,72 @@ def api_recent_alerts():
         # DB bloqueada/corrupta/etc => no romper UI del operador.
         print(f"[ERROR] Panel de Alertas DB: {e}")
         return jsonify({"status": "success", "alerts": []}), 200
+
+
+@app.get("/api/recent_detection_events")
+@login_required
+@role_required("operator")
+def api_recent_detection_events():
+    """
+    UI amigable: eventos agrupados en vez de miles de filas por frame.
+    Fail-safe: si no hay tabla o DB => lista vacía (200).
+    """
+    db_path = _get_metrics_db_path_abs()
+    limit_raw = (request.args.get("limit") or "").strip()
+    try:
+        limit = int(limit_raw) if limit_raw else 15
+    except Exception:
+        limit = 15
+    limit = max(1, min(50, int(limit)))
+
+    events: list[dict] = []
+    try:
+        if not os.path.exists(db_path):
+            return jsonify({"status": "success", "events": []}), 200
+
+        con = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
+        con.row_factory = sqlite3.Row
+        try:
+            _ensure_detection_events_schema(con)
+            cur = con.cursor()
+            cur.execute(
+                """
+                SELECT id, started_at, ended_at, max_confidence, detection_count, best_bbox_text, best_evidence_path, status, source
+                FROM detection_events
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            rows = cur.fetchall() or []
+            for r in rows:
+                best_path = (r["best_evidence_path"] or "") if "best_evidence_path" in r.keys() else ""
+                best_url = ""
+                if best_path:
+                    p = str(best_path).replace("\\", "/").lstrip("/")
+                    best_url = "/" + p
+                events.append(
+                    {
+                        "id": int(r["id"]) if r["id"] is not None else None,
+                        "started_at": r["started_at"],
+                        "ended_at": r["ended_at"],
+                        "max_confidence": float(r["max_confidence"]) if r["max_confidence"] is not None else 0.0,
+                        "detection_count": int(r["detection_count"]) if r["detection_count"] is not None else 0,
+                        "best_bbox": (r["best_bbox_text"] or "-") if "best_bbox_text" in r.keys() else "-",
+                        "best_evidence_url": best_url,
+                        "status": r["status"] or "",
+                        "source": r["source"] or "",
+                    }
+                )
+            return jsonify({"status": "success", "events": events}), 200
+        finally:
+            try:
+                con.close()
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[EVENTS][ERROR] {e}")
+        return jsonify({"status": "success", "events": []}), 200
 
 def _safe_rel_path(rel_path: str) -> str:
     """
@@ -1942,6 +2437,110 @@ def _safe_rel_path(rel_path: str) -> str:
     if ".." in rel.split("/"):
         raise ValueError("invalid_path")
     return rel
+
+
+def cleanup_old_evidence(*, dry_run: bool = True) -> dict:
+    """
+    Limpieza segura de evidencias para no saturar disco.
+
+    - No se ejecuta automáticamente.
+    - Por defecto `dry_run=True` (solo reporta).
+    """
+    evidence_dir = (os.environ.get("EVIDENCE_DIR") or EVIDENCE_DIR).strip() or EVIDENCE_DIR
+    max_files = int(_env_int("EVIDENCE_MAX_FILES", 500))
+    max_age_days = int(_env_int("EVIDENCE_MAX_AGE_DAYS", 30))
+    max_files = max(50, min(5000, int(max_files)))
+    max_age_days = max(1, min(365, int(max_age_days)))
+
+    abs_dir = evidence_dir
+    if not os.path.isabs(abs_dir):
+        abs_dir = os.path.join(app.root_path, evidence_dir)
+    abs_dir = os.path.abspath(abs_dir)
+
+    kept_refs: set[str] = set()
+    db_path = _get_metrics_db_path_abs()
+    try:
+        if os.path.exists(db_path):
+            con = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
+            con.row_factory = sqlite3.Row
+            try:
+                _ensure_detection_events_schema(con)
+                cur = con.cursor()
+                cur.execute(
+                    """
+                    SELECT best_evidence_path
+                    FROM detection_events
+                    ORDER BY id DESC
+                    LIMIT 200
+                    """
+                )
+                for r in cur.fetchall() or []:
+                    p = (r["best_evidence_path"] or "").replace("\\", "/").lstrip("/")
+                    if p:
+                        kept_refs.add(p)
+            finally:
+                try:
+                    con.close()
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    try:
+        if not os.path.isdir(abs_dir):
+            return {"ok": True, "evidence_dir": abs_dir, "files_deleted": 0, "dry_run": dry_run, "reason": "missing_dir"}
+
+        now = time.time()
+        max_age_s = float(max_age_days) * 86400.0
+        files = []
+        for name in os.listdir(abs_dir):
+            if not name.lower().endswith((".jpg", ".jpeg", ".png")):
+                continue
+            abs_path = os.path.join(abs_dir, name)
+            try:
+                st = os.stat(abs_path)
+            except Exception:
+                continue
+            rel_path = os.path.relpath(abs_path, app.root_path).replace("\\", "/")
+            files.append({"abs": abs_path, "rel": rel_path, "mtime": float(st.st_mtime)})
+
+        to_delete = []
+        for f in files:
+            age_s = now - float(f["mtime"])
+            if age_s > max_age_s and f["rel"].replace("\\", "/") not in kept_refs:
+                to_delete.append(f)
+
+        files_sorted = sorted(files, key=lambda x: float(x["mtime"]))
+        if len(files_sorted) - len(to_delete) > max_files:
+            for f in files_sorted:
+                if len(files_sorted) - len(to_delete) <= max_files:
+                    break
+                if f["rel"].replace("\\", "/") in kept_refs:
+                    continue
+                if f not in to_delete:
+                    to_delete.append(f)
+
+        deleted = 0
+        for f in to_delete:
+            if dry_run:
+                continue
+            try:
+                os.remove(f["abs"])
+                deleted += 1
+            except Exception:
+                continue
+
+        return {
+            "ok": True,
+            "evidence_dir": abs_dir,
+            "dry_run": bool(dry_run),
+            "files_total": len(files),
+            "files_marked": len(to_delete),
+            "files_deleted": deleted,
+            "kept_refs": len(kept_refs),
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 def _dataset_recoleccion_root() -> str:
     """

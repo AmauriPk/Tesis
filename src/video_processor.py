@@ -429,6 +429,8 @@ class LiveVideoProcessor:
 
         self._evidence_saved_for_active_detection = False
         self._last_evidence_saved_at = 0.0
+        self._best_evidence_conf_for_active_detection = 0.0
+        self._last_evidence_skip_log_at = 0.0
 
         self._stream_lock = threading.Lock()
         self._latest_jpeg: Optional[bytes] = None
@@ -497,17 +499,55 @@ class LiveVideoProcessor:
 
     def _save_evidence(self, frame: np.ndarray, detection_list: list[dict[str, Any]]) -> None:
         now = time.time()
-        if self._evidence_saved_for_active_detection:
-            return
-        if (now - float(self._last_evidence_saved_at)) < 1.0:
+        try:
+            min_conf = float(os.environ.get("EVIDENCE_MIN_CONFIDENCE", "0.85") or 0.85)
+        except Exception:
+            min_conf = 0.85
+        min_conf = float(clamp(float(min_conf), 0.10, 1.00))
+
+        try:
+            cooldown_s = float(os.environ.get("EVIDENCE_COOLDOWN_SECONDS", "5") or 5.0)
+        except Exception:
+            cooldown_s = 5.0
+        cooldown_s = float(clamp(float(cooldown_s), 1.0, 60.0))
+
+        # Regla: no guardar evidencia por cada frame.
+        # - cooldown global
+        # - una evidencia por "detección activa" salvo que haya una mejora clara de confianza
+        if (now - float(self._last_evidence_saved_at)) < float(cooldown_s):
             return
 
-        rel_folder = self.deps.detections_folder_rel.replace("\\", "/")
+        best_det: dict[str, Any] | None = None
+        best_conf = 0.0
+        for d in detection_list or []:
+            if not isinstance(d, dict):
+                continue
+            try:
+                c = float(d.get("confidence") or 0.0)
+            except Exception:
+                c = 0.0
+            if c >= best_conf:
+                best_conf = c
+                best_det = d
+
+        if float(best_conf) < float(min_conf):
+            if (now - float(self._last_evidence_skip_log_at)) > 2.0:
+                print(f"[EVIDENCE] skipped reason=confidence conf={float(best_conf):.3f} min={float(min_conf):.3f}")
+                self._last_evidence_skip_log_at = now
+            return
+
+        if self._evidence_saved_for_active_detection and float(best_conf) <= float(self._best_evidence_conf_for_active_detection):
+            # Ya guardamos evidencia para la detección activa y no hay mejora.
+            return
+
+        rel_folder = (os.environ.get("EVIDENCE_DIR") or self.deps.detections_folder_rel).strip() or self.deps.detections_folder_rel
+        rel_folder = rel_folder.replace("\\", "/")
         abs_folder = os.path.join(self.deps.app_root_path, rel_folder)
         os.makedirs(abs_folder, exist_ok=True)
 
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        fname = f"live_alert_{stamp}.jpg"
+        conf_pct = int(round(float(best_conf) * 100.0))
+        fname = f"evidence_{stamp}_conf{conf_pct:02d}.jpg"
         rel_path = os.path.join(rel_folder, fname).replace("\\", "/")
         abs_path = os.path.join(self.deps.app_root_path, rel_path)
 
@@ -520,6 +560,8 @@ class LiveVideoProcessor:
                 det["image_path"] = rel_path
         self._evidence_saved_for_active_detection = True
         self._last_evidence_saved_at = now
+        self._best_evidence_conf_for_active_detection = float(best_conf)
+        print(f"[EVIDENCE] saved path={rel_path} conf={float(best_conf):.3f}")
 
     def _update_ui_state(
         self,
@@ -638,6 +680,7 @@ class LiveVideoProcessor:
                     pass
             else:
                 self._evidence_saved_for_active_detection = False
+                self._best_evidence_conf_for_active_detection = 0.0
 
             if inference_ms is not None and self.metrics_enqueue and self.make_frame_record:
                 try:
