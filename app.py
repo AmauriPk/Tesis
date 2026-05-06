@@ -63,6 +63,11 @@ try:
 except Exception:  # pragma: no cover
     ffmpeg = None
 
+try:
+    import imageio_ffmpeg  # type: ignore
+except Exception:  # pragma: no cover
+    imageio_ffmpeg = None
+
 from config import FLASK_CONFIG, ONVIF_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG, _env_float, _env_int
 from src.system_core import CameraConfig, FrameRecord, MetricsDBWriter, PTZController, User, db
 from src.video_processor import LiveStreamDeps, LiveVideoProcessor, RTSPLatestFrameReader, draw_detections
@@ -3723,6 +3728,39 @@ def create_video_writer(output_path: str, fps: float, width: int, height: int):
     return None, None, None
 
 
+def resolve_ffmpeg_bin() -> str | None:
+    """
+    Resuelve un ejecutable ffmpeg en este orden:
+    1) env FFMPEG_BIN (si existe en disco)
+    2) shutil.which("ffmpeg")
+    3) imageio_ffmpeg.get_ffmpeg_exe() (si está instalado)
+    """
+    env_path = (os.environ.get("FFMPEG_BIN") or "").strip()
+    if env_path:
+        try:
+            if os.path.exists(env_path):
+                return env_path
+        except Exception:
+            pass
+
+    try:
+        p = shutil.which("ffmpeg")
+        if p:
+            return p
+    except Exception:
+        pass
+
+    if imageio_ffmpeg is not None:
+        try:
+            p = imageio_ffmpeg.get_ffmpeg_exe()  # type: ignore[attr-defined]
+            if p and os.path.exists(p):
+                return str(p)
+        except Exception:
+            pass
+
+    return None
+
+
 def transcode_to_browser_mp4(input_path: str, output_path: str) -> tuple[bool, str | None]:
     """
     Intenta transcodificar `input_path` a un MP4 reproducible en navegador.
@@ -3735,9 +3773,7 @@ def transcode_to_browser_mp4(input_path: str, output_path: str) -> tuple[bool, s
 
     print(f"[VIDEO_TRANSCODE] input={in_path} output={out_path}")
 
-    ffmpeg_bin = (os.environ.get("FFMPEG_BIN") or "").strip() or None
-    if ffmpeg_bin is None:
-        ffmpeg_bin = shutil.which("ffmpeg")
+    ffmpeg_bin = resolve_ffmpeg_bin()
 
     # ffmpeg-python (requiere binario ffmpeg en PATH).
     if ffmpeg is not None:
@@ -3760,6 +3796,7 @@ def transcode_to_browser_mp4(input_path: str, output_path: str) -> tuple[bool, s
         print("[VIDEO_TRANSCODE][ERROR] ffmpeg no encontrado. Instale FFmpeg o configure FFMPEG_BIN.")
         print("[VIDEO_TRANSCODE] success=False reason=ffmpeg_missing")
         return False, "ffmpeg_missing"
+    print(f"[VIDEO_TRANSCODE] ffmpeg_bin={ffmpeg_bin}")
 
     for vcodec in ("libx264", "mpeg4"):
         try:

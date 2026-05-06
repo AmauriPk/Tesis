@@ -13,6 +13,11 @@ Para asegurar compatibilidad en el navegador, el sistema intenta convertir el vi
 winget install Gyan.FFmpeg
 ```
 
+## Alternativa automática (imageio-ffmpeg)
+
+Si no quieres instalar FFmpeg globalmente (PATH), el proyecto incluye `imageio-ffmpeg` como fallback.
+Esta librería puede descargar/proveer un `ffmpeg` embebido y el backend lo intentará usar automáticamente.
+
 ## Verificar instalación
 
 ```bat
@@ -40,4 +45,3 @@ FFMPEG_BIN=C:\ffmpeg\bin\ffmpeg.exe
 - Si no hay FFmpeg o la conversión falla:
   - El sistema mantiene el video “raw” como descarga
   - La interfaz muestra una advertencia y deja disponible el botón **Descargar**
-
