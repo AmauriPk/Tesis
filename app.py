@@ -362,6 +362,48 @@ def is_camera_configured_ptz() -> bool:
     """
     return bool(leer_config_camara())
 
+
+def _update_tracking_target(payload: dict) -> None:
+    global _last_tracking_target_log_at, _last_tracking_target_bbox
+    try:
+        has_target = bool(payload.get("has_target"))
+        bbox = payload.get("bbox")
+        with tracking_target_lock:
+            tracking_target_state["has_target"] = bool(has_target)
+            tracking_target_state["bbox"] = bbox if has_target else None
+            tracking_target_state["frame_w"] = payload.get("frame_w")
+            tracking_target_state["frame_h"] = payload.get("frame_h")
+            tracking_target_state["confidence"] = float(payload.get("confidence") or 0.0)
+            tracking_target_state["updated_at"] = float(payload.get("updated_at") or time.time())
+        if has_target and bbox:
+            now = time.time()
+            if bbox != _last_tracking_target_bbox or (now - float(_last_tracking_target_log_at)) > 1.0:
+                _last_tracking_target_bbox = bbox
+                _last_tracking_target_log_at = now
+                print(
+                    "[TRACKING_TARGET]",
+                    f"bbox={tuple(bbox)} conf={float(payload.get('confidence') or 0.0):.3f} updated=True",
+                )
+    except Exception:
+        pass
+
+
+def _get_tracking_target_snapshot() -> dict:
+    with tracking_target_lock:
+        return dict(tracking_target_state)
+
+
+def _tracking_target_is_recent() -> tuple[bool, float]:
+    snap = _get_tracking_target_snapshot()
+    now = time.time()
+    try:
+        ttl = float(os.environ.get("PTZ_TRACKING_TARGET_TTL", "1.5"))
+    except Exception:
+        ttl = 1.5
+    ttl = float(_clamp(ttl, 0.5, 3.0))
+    age = now - float(snap.get("updated_at") or 0.0)
+    return bool(snap.get("has_target")) and (age <= ttl), float(age)
+
 # _env_float() and _env_int() are now imported from config.py (consolidation of duplicated code)
 
 MODEL_PARAMS = {
@@ -427,6 +469,19 @@ _onvif_last_probe_at: float | None = None
 _onvif_last_probe_error: str | None = None
 _last_ptz_ready_automation: bool | None = None
 _last_ptz_ready_manual: bool | None = None
+
+# Tracking PTZ (separado del hilo de video)
+tracking_target_lock = threading.Lock()
+tracking_target_state = {
+    "has_target": False,
+    "bbox": None,
+    "frame_w": None,
+    "frame_h": None,
+    "confidence": 0.0,
+    "updated_at": 0.0,
+}
+_last_tracking_target_log_at = 0.0
+_last_tracking_target_bbox = None
 
 current_detection_state = {
     "status": "Zona despejada",
@@ -611,7 +666,9 @@ class _InspectionPatrolWorker:
                     tracking = bool(auto_tracking_enabled)
                     detected = bool(current_detection_state.get("detected"))
                 ptz_ok = bool(is_ptz_ready_for_automation())
+                has_recent_target, _age = _tracking_target_is_recent()
                 paused_by_detection = bool(tracking and detected)
+                paused_by_tracking_target = bool(tracking and has_recent_target)
 
                 if not enabled or not ptz_ok:
                     if self._patrolling:
@@ -624,19 +681,28 @@ class _InspectionPatrolWorker:
                     continue
 
                 now = time.time()
+                mode = (os.environ.get("PTZ_INSPECTION_MODE") or "sweep").strip().lower() or "sweep"
                 speed = float(_env_float("PTZ_INSPECTION_SPEED", 0.45))
                 duration = float(_env_float("PTZ_INSPECTION_DURATION", 4.0))
                 pause = float(_env_float("PTZ_INSPECTION_PAUSE", 0.7))
-                speed = _clamp(abs(float(speed)), 0.05, 0.80)
-                duration = _clamp(float(duration), 0.5, 8.0)
-                pause = _clamp(float(pause), 0.2, 3.0)
+                if mode == "sweep":
+                    speed = _clamp(abs(float(speed)), 0.05, 1.00)
+                    duration = _clamp(float(duration), 1.0, 20.0)
+                    pause = _clamp(float(pause), 0.2, 5.0)
+                else:
+                    speed = _clamp(abs(float(speed)), 0.05, 0.80)
+                    duration = _clamp(float(duration), 0.5, 8.0)
+                    pause = _clamp(float(pause), 0.2, 3.0)
                 x_speed = float(speed) * float(self._dir)
 
-                if paused_by_detection:
+                if paused_by_detection or paused_by_tracking_target:
                     if self._patrolling and not self._stop_sent_in_pause:
                         ptz_worker.enqueue_stop()
                         self._stop_sent_in_pause = True
-                        print("[INSPECTION_CMD]", "phase=stop paused_by_detection=True")
+                        print(
+                            "[INSPECTION_CMD]",
+                            f"phase=stop paused_by_tracking={bool(paused_by_tracking_target)} paused_by_detection={bool(paused_by_detection)}",
+                        )
                     self._patrolling = False
                     self._phase = "move"
                     self._next_action_at = 0.0
@@ -675,6 +741,160 @@ class _InspectionPatrolWorker:
                 print(f"[INSPECTION_WORKER][ERROR] {e}")
 inspection_worker = _InspectionPatrolWorker(idle_s=10.0)
 inspection_worker.start()
+
+
+class _TrackingPTZWorker:
+    def __init__(self):
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._last_cmd_at = 0.0
+        self._last_cmd = (0.0, 0.0)
+        self._was_moving = False
+        self._last_error_log_at = 0.0
+
+    def start(self):
+        if not self._thread.is_alive():
+            self._thread.start()
+
+    def _run(self):
+        while not self._stop.is_set():
+            try:
+                time.sleep(0.20)
+                with state_lock:
+                    enabled = bool(auto_tracking_enabled)
+                ptz_ok = bool(is_ptz_ready_for_automation())
+                if not enabled or not ptz_ok:
+                    if self._was_moving:
+                        ptz_worker.enqueue_stop()
+                        self._was_moving = False
+                        print("[TRACKING_WORKER]", "stop reason=tracking_disabled")
+                    continue
+
+                snap = _get_tracking_target_snapshot()
+                now = time.time()
+
+                try:
+                    ttl = float(os.environ.get("PTZ_TRACKING_TARGET_TTL", "1.5"))
+                except Exception:
+                    ttl = 1.5
+                ttl = float(_clamp(ttl, 0.5, 3.0))
+
+                has_target = bool(snap.get("has_target")) and bool(snap.get("bbox"))
+                age = now - float(snap.get("updated_at") or 0.0)
+                if (not has_target) or (age > ttl):
+                    if self._was_moving:
+                        ptz_worker.enqueue_stop()
+                        self._was_moving = False
+                        print("[TRACKING_WORKER]", f"stop reason=target_lost age={float(age):.2f}")
+                    continue
+
+                try:
+                    command_interval = float(os.environ.get("PTZ_TRACKING_COMMAND_INTERVAL", "0.35"))
+                except Exception:
+                    command_interval = 0.35
+                command_interval = float(_clamp(command_interval, 0.20, 1.00))
+                if (now - float(self._last_cmd_at)) < float(command_interval):
+                    continue
+
+                try:
+                    speed = float(os.environ.get("PTZ_TRACKING_SPEED", "0.35"))
+                except Exception:
+                    speed = 0.35
+                speed = float(_clamp(speed, 0.05, 0.70))
+
+                try:
+                    max_speed = float(os.environ.get("PTZ_TRACKING_MAX_SPEED", "0.50"))
+                except Exception:
+                    max_speed = 0.50
+                max_speed = float(_clamp(max_speed, 0.10, 0.70))
+                speed = float(min(float(speed), float(max_speed)))
+
+                try:
+                    min_speed = float(os.environ.get("PTZ_TRACKING_MIN_SPEED", "0.12"))
+                except Exception:
+                    min_speed = 0.12
+                min_speed = float(_clamp(min_speed, 0.05, 0.30))
+
+                try:
+                    duration_s = float(os.environ.get("PTZ_TRACKING_DURATION", "0.30"))
+                except Exception:
+                    duration_s = 0.30
+                duration_s = float(_clamp(duration_s, 0.10, 0.80))
+
+                try:
+                    deadzone_frac = float(os.environ.get("PTZ_TRACKING_DEADZONE_FRAC", "0.10"))
+                except Exception:
+                    deadzone_frac = 0.10
+                deadzone_frac = float(_clamp(deadzone_frac, 0.05, 0.25))
+
+                bbox = tuple(snap.get("bbox"))
+                fw = int(snap.get("frame_w") or 0)
+                fh = int(snap.get("frame_h") or 0)
+                if fw <= 0 or fh <= 0:
+                    continue
+
+                x1, y1, x2, y2 = bbox
+                cx = (float(x1) + float(x2)) / 2.0
+                cy = (float(y1) + float(y2)) / 2.0
+                fx = float(fw) / 2.0
+                fy = float(fh) / 2.0
+                deadzone_x = float(fw) * float(deadzone_frac)
+                deadzone_y = float(fh) * float(deadzone_frac)
+
+                pan = 0.0
+                if cx < (fx - deadzone_x):
+                    pan = -float(speed)
+                elif cx > (fx + deadzone_x):
+                    pan = float(speed)
+
+                tilt = 0.0
+                if cy < (fy - deadzone_y):
+                    tilt = float(speed)
+                elif cy > (fy + deadzone_y):
+                    tilt = -float(speed)
+
+                if os.environ.get("PTZ_INVERT_PAN", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}:
+                    pan = -1.0 * float(pan)
+                if os.environ.get("PTZ_INVERT_TILT", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}:
+                    tilt = -1.0 * float(tilt)
+
+                def _apply_min(v: float) -> float:
+                    if abs(float(v)) < 1e-6:
+                        return 0.0
+                    sign = 1.0 if float(v) > 0 else -1.0
+                    mag = float(min(max(abs(float(v)), float(min_speed)), float(max_speed)))
+                    return float(sign) * float(mag)
+
+                pan = _apply_min(float(pan))
+                tilt = _apply_min(float(tilt))
+
+                if abs(float(pan)) < 1e-6 and abs(float(tilt)) < 1e-6:
+                    if self._was_moving:
+                        ptz_worker.enqueue_stop()
+                        self._was_moving = False
+                        print("[TRACKING_WORKER]", "stop reason=centered")
+                    self._last_cmd_at = now
+                    continue
+
+                cmd = (float(pan), float(tilt))
+                if cmd == tuple(self._last_cmd) and self._was_moving:
+                    self._last_cmd_at = now
+                    continue
+
+                ptz_worker.enqueue_move(x=float(pan), y=float(tilt), zoom=0.0, duration_s=float(duration_s), source="tracking")
+                self._last_cmd = cmd
+                self._last_cmd_at = now
+                self._was_moving = True
+                print("[TRACKING_WORKER]", f"move pan={float(pan):.3f} tilt={float(tilt):.3f} age={float(age):.2f} duration={float(duration_s):.2f}")
+            except Exception as e:
+                now = time.time()
+                if (now - float(self._last_error_log_at)) > 2.0:
+                    print(f"[TRACKING_WORKER][ERROR] {e}")
+                    self._last_error_log_at = now
+
+
+tracking_worker = _TrackingPTZWorker()
+tracking_worker.start()
 
 def _select_priority_detection(detection_list: list[dict]) -> dict | None:
     """
@@ -1066,6 +1286,7 @@ live_processor = LiveVideoProcessor(
     state_lock=state_lock,
     detection_state=current_detection_state,
     ui_persistence_frames=int(DETECTION_PERSISTENCE_FRAMES),
+    update_tracking_target=_update_tracking_target,
 )
 
 # ======================== AUTH ========================
