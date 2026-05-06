@@ -147,31 +147,48 @@ def ptz_centering_vector(
     max_speed: float = 0.60,
 ) -> tuple[float, float]:
     """
-    Vector de centrado PTZ (pan/tilt) basado en offset del bbox.
+    Tracking PTZ simple por zonas (estable):
+    - Centro del bbox vs centro del frame.
+    - Deadzone fija: 12% del frame por eje.
+    - Fuera => velocidad constante (no proporcional).
+    - Respeta PTZ_INVERT_PAN / PTZ_INVERT_TILT.
     """
-    dx, dy = bbox_offset_norm(frame_w, frame_h, bbox_xyxy)
-    tol = float(clamp(float(tolerance_frac), 0.01, 0.90))
+    fw = max(1, int(frame_w))
+    fh = max(1, int(frame_h))
+    x1, y1, x2, y2 = bbox_xyxy
 
-    def _map(d: float) -> float:
-        ad = abs(float(d))
-        if ad <= tol:
-            return 0.0
-        scaled = (ad - tol) / max(1e-6, 1.0 - tol)
-        return float(clamp(scaled, 0.0, 1.0))
+    cx = (float(x1) + float(x2)) / 2.0
+    cy = (float(y1) + float(y2)) / 2.0
+    fx = float(fw) / 2.0
+    fy = float(fh) / 2.0
 
-    x_mag = _map(dx)
-    y_mag = _map(dy)
+    deadzone_x = float(fw) * 0.12
+    deadzone_y = float(fh) * 0.12
 
-    x = x_mag * (1.0 if dx >= 0 else -1.0)
-    y = y_mag * (1.0 if dy >= 0 else -1.0)
+    pan = 0.0
+    if cx < (fx - deadzone_x):
+        pan = -0.12
+    elif cx > (fx + deadzone_x):
+        pan = 0.12
 
-    x = float(clamp(x * float(max_speed), -float(max_speed), float(max_speed)))
-    y = float(clamp(y * float(max_speed), -float(max_speed), float(max_speed)))
-    # Nota: si el eje vertical se siente invertido en tu PTZ, habilita:
-    #   PTZ_INVERT_TILT=1
+    tilt = 0.0
+    if cy < (fy - deadzone_y):
+        tilt = 0.12
+    elif cy > (fy + deadzone_y):
+        tilt = -0.12
+
+    if os.environ.get("PTZ_INVERT_PAN", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}:
+        pan = -1.0 * float(pan)
     if os.environ.get("PTZ_INVERT_TILT", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}:
-        y = -1.0 * float(y)
-    return x, y
+        tilt = -1.0 * float(tilt)
+
+    moving = (abs(float(pan)) > 1e-6) or (abs(float(tilt)) > 1e-6)
+    print(
+        "[TRACKING_CMD]",
+        f"cx={cx:.1f} cy={cy:.1f} fx={fx:.1f} fy={fy:.1f} pan={float(pan):.3f} tilt={float(tilt):.3f} "
+        f"moving={bool(moving)}",
+    )
+    return float(pan), float(tilt)
 
 
 def _apply_min_ptz_speed(value: float, min_speed: float = 0.08, max_speed: float = 0.25) -> float:

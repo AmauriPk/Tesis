@@ -65,7 +65,6 @@ except Exception:  # pragma: no cover
 from config import FLASK_CONFIG, ONVIF_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG, _env_float, _env_int
 from src.system_core import CameraConfig, FrameRecord, MetricsDBWriter, PTZController, User, db
 from src.video_processor import LiveStreamDeps, LiveVideoProcessor, RTSPLatestFrameReader
-import src.video_processor as video_processor_module
 from src.system_core import clamp, select_priority_detection
 
 # ======================== APP / DB ========================
@@ -461,67 +460,6 @@ def _bbox_offset_norm(frame_w: int, frame_h: int, bbox_xyxy) -> tuple[float, flo
     dx = (cx - center_x) / max(1.0, (frame_w / 2.0))  # -1..1
     dy = (cy - center_y) / max(1.0, (frame_h / 2.0))  # -1..1 (positivo hacia abajo)
     return float(dx), float(dy)
-
-def _env_flag(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(str(name), "")
-    if raw is None:
-        return bool(default)
-    v = str(raw).strip().lower()
-    if not v:
-        return bool(default)
-    return v in {"1", "true", "t", "yes", "y", "on"}
-
-def _ptz_zone_tracking_vector(
-    frame_w: int,
-    frame_h: int,
-    bbox_xyxy,
-    *,
-    tolerance_frac: float = 0.20,  # compat: ignorado (tracking por zonas)
-    max_speed: float = 0.60,  # compat: ignorado (speed fijo)
-) -> tuple[float, float]:
-    fw = max(1, int(frame_w))
-    fh = max(1, int(frame_h))
-    try:
-        x1, y1, x2, y2 = bbox_xyxy
-    except Exception:
-        return 0.0, 0.0
-
-    cx = (float(x1) + float(x2)) / 2.0
-    cy = (float(y1) + float(y2)) / 2.0
-    fx = float(fw) / 2.0
-    fy = float(fh) / 2.0
-
-    deadzone_x = float(fw) * 0.12
-    deadzone_y = float(fh) * 0.12
-
-    pan = 0.0
-    if cx < (fx - deadzone_x):
-        pan = -0.12
-    elif cx > (fx + deadzone_x):
-        pan = 0.12
-
-    tilt = 0.0
-    if cy < (fy - deadzone_y):
-        tilt = 0.12
-    elif cy > (fy + deadzone_y):
-        tilt = -0.12
-
-    if _env_flag("PTZ_INVERT_PAN", False):
-        pan = -1.0 * float(pan)
-    if _env_flag("PTZ_INVERT_TILT", False):
-        tilt = -1.0 * float(tilt)
-
-    moving = (abs(float(pan)) > 1e-6) or (abs(float(tilt)) > 1e-6)
-    print(
-        "[TRACKING_CMD]",
-        f"cx={cx:.1f} cy={cy:.1f} fx={fx:.1f} fy={fy:.1f} pan={float(pan):.3f} tilt={float(tilt):.3f} "
-        f"moving={bool(moving)}",
-    )
-    return float(pan), float(tilt)
-
-
-# Tracking PTZ por zonas (sin tocar `src/video_processor.py`).
-video_processor_module.ptz_centering_vector = _ptz_zone_tracking_vector
 
 def _ptz_centering_vector(
     frame_w: int,

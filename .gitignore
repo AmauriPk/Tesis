@@ -47,5 +47,8 @@ Thumbs.db
 config_camara.json
 instance/
 
+# Notas locales
+Indicacion para git.txt
+
 # Bases de datos
 *.db
