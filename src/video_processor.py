@@ -143,7 +143,7 @@ def ptz_centering_vector(
     frame_h: int,
     bbox_xyxy: tuple[int, int, int, int],
     *,
-    tolerance_frac: float = 0.20,
+    tolerance_frac: float = 0.15,
     max_speed: float = 0.60,
 ) -> tuple[float, float]:
     """
@@ -231,6 +231,15 @@ class RTSPLatestFrameReader:
                             src = self._current_url
                     cap = cv2.VideoCapture(src)
                     if cap.isOpened():
+                        timeout_ms = int(float(self._rtsp_config.get("timeout", 10)) * 1000.0)
+                        try:
+                            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
+                        except Exception:
+                            pass
+                        try:
+                            cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
+                        except Exception:
+                            pass
                         cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(self._video_config.get("width", 1280)))
                         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self._video_config.get("height", 720)))
                         cap.set(cv2.CAP_PROP_FPS, int(self._video_config.get("fps", 30)))
@@ -588,7 +597,7 @@ class LiveVideoProcessor:
                     if priority is not None:
                         h, w = frame.shape[:2]
                         try:
-                            tolerance_frac = float(os.environ.get("PTZ_CENTER_TOLERANCE_FRAC", "0.20"))
+                            tolerance_frac = float(os.environ.get("PTZ_CENTER_TOLERANCE_FRAC", "0.15"))
                         except Exception:
                             tolerance_frac = 0.20
                         x, y = ptz_centering_vector(

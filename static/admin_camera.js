@@ -36,6 +36,22 @@
   };
 
   const boot = () => {
+    document.querySelectorAll("[data-toggle-password]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const sel = btn.getAttribute("data-toggle-password");
+        if (!sel) return;
+        const input = document.querySelector(sel);
+        if (!input) return;
+        const isPwd = input.getAttribute("type") === "password";
+        input.setAttribute("type", isPwd ? "text" : "password");
+        const icon = btn.querySelector("i");
+        if (icon) {
+          icon.classList.toggle("fa-eye", !isPwd);
+          icon.classList.toggle("fa-eye-slash", isPwd);
+        }
+      });
+    });
+
     const sameCreds = byId("sameCreds");
     const onvifRow = byId("onvifCredsRow");
     if (sameCreds && onvifRow) {
@@ -93,10 +109,17 @@
           setAlert("testSuccess", "Conexión verificada.");
           if (data.warning) setAlert("testWarning", String(data.warning));
 
-          if (data.snapshot_b64) {
+          const snapUrl = data.snapshot_url ? String(data.snapshot_url) : "";
+          if (snapUrl) {
             const img = byId("snapshotImg");
             const cap = byId("snapshotCaption");
-            if (img) img.src = String(data.snapshot_b64);
+            if (img) img.src = `${snapUrl}?t=${Date.now()}`;
+            if (cap) cap.textContent = "Vista previa";
+            show("snapshotWrap", true);
+          } else if (data.snapshot_b64) {
+            const img = byId("snapshotImg");
+            const cap = byId("snapshotCaption");
+            if (img) img.src = `data:image/jpeg;base64,${String(data.snapshot_b64)}`;
             if (cap) cap.textContent = "Vista previa";
             show("snapshotWrap", true);
           }
@@ -116,4 +139,3 @@
     boot();
   }
 })();
-

@@ -1,56 +1,730 @@
-:root{
-  --bg0:#0b0e14;
-  --bg1:#121821;
-  --bg2:#161b22;
-  --bd:#30363d;
-  --txt:#e6edf3;
-  --mut:#9aa4b2;
-  --ok:#00d4aa;
-  --warn:#ffaa00;
-  --bad:#ff4d4d;
-  --accent:#7aa2f7;
+/* ================================================================
+   VIGÍA — Centro de Operaciones
+   Procesamiento de flujo de video · Modelo de visión
+   Tema: Hardware Militar / Radar Terminal
+   ================================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
+
+/* ── Variables del sistema ─────────────────────────────────── */
+:root {
+  /* Fondos */
+  --bg0:          #020508;
+  --bg1:          #040b10;
+  --bg2:          #060d14;
+  --bg3:          #0b1a24;
+
+  /* Bordes verdes */
+  --bd:           #0e2e0e;
+  --bd-mid:       #174a17;
+  --bd-bright:    #1e6b1e;
+
+  /* Verde neón — estilo fósforo de radar antiguo */
+  --neon:         #00ff41;
+  --neon-dim:     #00cc33;
+  --neon-pale:    #007a1e;
+  --neon-faint:   rgba(0, 255, 65, .07);
+  --neon-trace:   rgba(0, 255, 65, .14);
+  --neon-glow:    rgba(0, 255, 65, .48);
+
+  /* Ámbar — estados críticos */
+  --amber:        #ffb300;
+  --amber-hot:    #ff6f00;
+  --amber-faint:  rgba(255, 179, 0, .07);
+  --amber-glow:   rgba(255, 179, 0, .52);
+
+  /* Rojo — alerta máxima */
+  --bad:          #ff3d00;
+  --bad-faint:    rgba(255, 61, 0, .07);
+  --bad-glow:     rgba(255, 61, 0, .52);
+
+  /* Alias semánticos */
+  --ok:           var(--neon);
+  --warn:         var(--amber);
+
+  /* Texto */
+  --txt:          #a8ffc0;
+  --txt-bright:   #d8ffe4;
+  --mut:          #2d6b3a;
+  --mut2:         #3d8050;
+
+  /* Tipografía */
+  --ff-mono:      'Share Tech Mono', 'Courier New', Courier, monospace;
+  --ff-head:      'Orbitron', 'Share Tech Mono', monospace;
+
+  /* Corner brackets */
+  --cs:           14px;
+  --ct:           2px;
 }
 
-html, body{ background:var(--bg0); color:var(--txt); }
-*{ box-sizing:border-box; }
+/* ── Reset base ─────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
 
-.navbar{ background:rgba(18,24,33,.95)!important; border-bottom:1px solid var(--bd)!important; }
-.card{ background:var(--bg2)!important; border:1px solid var(--bd)!important; border-radius:.75rem!important; }
-.card-header{ background:rgba(11,14,20,.85)!important; border-bottom:1px solid var(--bd)!important; color:var(--txt)!important; }
-
-.nav-tabs .nav-link{ color:var(--mut)!important; border:1px solid transparent!important; }
-.nav-tabs .nav-link.active{
-  color:var(--txt)!important;
-  background:var(--bg2)!important;
-  border-color:var(--bd) var(--bd) var(--bg2)!important;
+html, body {
+  background: var(--bg0) !important;
+  color: var(--txt) !important;
+  font-family: var(--ff-mono) !important;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
 }
 
-.form-control, .form-select{
-  background:#0f141b!important;
-  color:var(--txt)!important;
-  border:1px solid var(--bd)!important;
+/* ── Efecto scanlines (overlay sutil sobre toda la página) ─── */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 3px,
+    rgba(0, 0, 0, .025) 3px,
+    rgba(0, 0, 0, .025) 4px
+  );
 }
-.form-control:focus, .form-select:focus{ border-color:var(--accent)!important; box-shadow:none!important; }
 
-.btn-outline-light{ border-color:var(--bd)!important; color:var(--txt)!important; }
-.btn-outline-light:hover{ background:rgba(122,162,247,.12)!important; border-color:rgba(122,162,247,.5)!important; }
+/* ── Tipografía global ──────────────────────────────────────── */
+* { font-family: var(--ff-mono) !important; }
 
-.video-frame{ width:100%; background:#000; border:1px solid var(--bd); border-radius:.75rem; }
-
-.mono, .mono-neon{
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--ff-head) !important;
+  color: var(--txt-bright) !important;
+  letter-spacing: .06em;
 }
-.mono-neon{ color:var(--accent); }
 
-.status-pill{ font-weight:800; letter-spacing:.25px; }
-.status-pill.ok{ color:var(--ok); }
-.status-pill.bad{ color:var(--bad); }
+label,
+.form-label {
+  color: var(--neon-dim) !important;
+  font-size: .72rem !important;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  display: block !important;
+  opacity: 1 !important;
+}
 
-.table{ color:var(--txt); }
-.table thead th{ color:var(--mut); border-bottom:1px solid var(--bd)!important; }
-.table td, .table th{ border-color:rgba(48,54,61,.6)!important; }
+p, span, div, td, th, small, .small, li {
+  font-family: var(--ff-mono) !important;
+  color: var(--txt);
+}
 
-.badge{ border:1px solid rgba(48,54,61,.7); }
+.text-secondary { color: var(--mut2) !important; }
 
-.modal-content{ background:var(--bg1); color:var(--txt); border:1px solid var(--bd); }
+.mono,
+.mono-neon { font-family: var(--ff-mono) !important; }
 
+.mono-neon {
+  color: var(--neon) !important;
+  text-shadow: 0 0 7px var(--neon-glow);
+}
+
+.metric-value {
+  color: var(--neon) !important;
+  text-shadow: 0 0 6px var(--neon-glow);
+}
+
+/* ── Navbar ─────────────────────────────────────────────────── */
+.navbar {
+  background: rgba(2, 5, 8, .97) !important;
+  border-bottom: 1px solid var(--bd-bright) !important;
+  box-shadow: 0 1px 0 var(--bd), 0 0 28px rgba(0, 255, 65, .03) !important;
+  padding-top: .45rem !important;
+  padding-bottom: .45rem !important;
+}
+
+.vigia-brand {
+  font-family: var(--ff-head) !important;
+  color: var(--neon) !important;
+  text-shadow: 0 0 14px var(--neon-glow);
+  letter-spacing: .14em;
+  font-size: 1rem !important;
+  font-weight: 700;
+}
+.vigia-brand i { color: var(--neon) !important; }
+
+/* Badges en navbar */
+.badge,
+.badge-role {
+  font-family: var(--ff-mono) !important;
+  background: rgba(0, 0, 0, .65) !important;
+  border: 1px solid var(--bd-bright) !important;
+  color: var(--neon-dim) !important;
+  border-radius: 0 !important;
+  letter-spacing: .04em;
+  font-size: .7rem;
+}
+
+/* ── Pestañas de navegación ─────────────────────────────────── */
+.nav-tabs {
+  border-bottom: 1px solid var(--bd-bright) !important;
+}
+
+.nav-tabs .nav-link {
+  font-family: var(--ff-mono) !important;
+  color: var(--mut2) !important;
+  border: 1px solid transparent !important;
+  border-radius: 0 !important;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-size: .75rem !important;
+  padding: .45rem 1rem !important;
+  transition: color .15s, background .15s, border-color .15s;
+}
+
+.nav-tabs .nav-link:hover {
+  color: var(--neon-dim) !important;
+  border-color: var(--bd-mid) var(--bd-mid) transparent !important;
+  background: var(--neon-faint) !important;
+}
+
+.nav-tabs .nav-link.active {
+  color: var(--neon) !important;
+  background: var(--bg2) !important;
+  border-color: var(--bd-bright) var(--bd-bright) var(--bg2) !important;
+  text-shadow: 0 0 10px var(--neon-glow);
+}
+
+/* ── Cards / Paneles de hardware ────────────────────────────── */
+.card {
+  position: relative !important;
+  background: var(--bg2) !important;
+  border: 1px solid var(--bd-mid) !important;
+  border-radius: 0 !important;
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, .45) !important;
+}
+
+/*
+ * Corner brackets — technique:
+ * El pseudo-elemento ::before cubre el área de la card con un background
+ * compuesto por 8 gradientes posicionados en las 4 esquinas.
+ * Todo lo intermedio es transparente → solo se ven las marcas de esquina.
+ */
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+  background:
+    /* Esquina superior-izquierda */
+    linear-gradient(var(--neon), var(--neon)) top    left  / var(--cs) var(--ct) no-repeat,
+    linear-gradient(var(--neon), var(--neon)) top    left  / var(--ct) var(--cs) no-repeat,
+    /* Esquina superior-derecha */
+    linear-gradient(var(--neon), var(--neon)) top    right / var(--cs) var(--ct) no-repeat,
+    linear-gradient(var(--neon), var(--neon)) top    right / var(--ct) var(--cs) no-repeat,
+    /* Esquina inferior-izquierda */
+    linear-gradient(var(--neon), var(--neon)) bottom left  / var(--cs) var(--ct) no-repeat,
+    linear-gradient(var(--neon), var(--neon)) bottom left  / var(--ct) var(--cs) no-repeat,
+    /* Esquina inferior-derecha */
+    linear-gradient(var(--neon), var(--neon)) bottom right / var(--cs) var(--ct) no-repeat,
+    linear-gradient(var(--neon), var(--neon)) bottom right / var(--ct) var(--cs) no-repeat;
+}
+
+.card-header {
+  background: rgba(0, 0, 0, .62) !important;
+  border-bottom: 1px solid var(--bd-bright) !important;
+  color: var(--neon-dim) !important;
+  font-family: var(--ff-head) !important;
+  font-size: .70rem !important;
+  text-transform: uppercase !important;
+  letter-spacing: .13em !important;
+  padding: .5rem 1rem !important;
+  position: relative;
+  z-index: 11;
+}
+
+.card-header i {
+  color: var(--neon) !important;
+  margin-right: .35rem;
+  filter: drop-shadow(0 0 4px var(--neon-glow));
+}
+
+.card-body {
+  padding: .85rem 1rem !important;
+  position: relative;
+  z-index: 11;
+}
+
+/* ── Panel PTZ — énfasis en ámbar ───────────────────────────── */
+#ptzPanel {
+  border-color: rgba(255, 179, 0, .4) !important;
+  box-shadow:
+    0 0 20px rgba(255, 179, 0, .06),
+    inset 0 0 36px rgba(0, 0, 0, .55) !important;
+}
+
+#ptzPanel::before {
+  background:
+    linear-gradient(var(--amber), var(--amber)) top    left  / var(--cs) var(--ct) no-repeat,
+    linear-gradient(var(--amber), var(--amber)) top    left  / var(--ct) var(--cs) no-repeat,
+    linear-gradient(var(--amber), var(--amber)) top    right / var(--cs) var(--ct) no-repeat,
+    linear-gradient(var(--amber), var(--amber)) top    right / var(--ct) var(--cs) no-repeat,
+    linear-gradient(var(--amber), var(--amber)) bottom left  / var(--cs) var(--ct) no-repeat,
+    linear-gradient(var(--amber), var(--amber)) bottom left  / var(--ct) var(--cs) no-repeat,
+    linear-gradient(var(--amber), var(--amber)) bottom right / var(--cs) var(--ct) no-repeat,
+    linear-gradient(var(--amber), var(--amber)) bottom right / var(--ct) var(--cs) no-repeat;
+}
+
+#ptzPanel .card-header {
+  border-bottom-color: rgba(255, 179, 0, .5) !important;
+  color: var(--amber) !important;
+}
+
+#ptzPanel .card-header i {
+  color: var(--amber) !important;
+  filter: drop-shadow(0 0 4px var(--amber-glow));
+}
+
+/* ── Joystick PTZ — botones direccionales ───────────────────── */
+.ptz-btn {
+  background: rgba(0, 5, 2, .85) !important;
+  border: 1px solid var(--neon-dim) !important;
+  color: var(--neon) !important;
+  border-radius: 0 !important;
+  font-size: 1rem !important;
+  padding: .5rem !important;
+  transition: all .12s ease !important;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.ptz-btn:hover {
+  background: rgba(0, 255, 65, .09) !important;
+  border-color: var(--neon) !important;
+  color: var(--neon) !important;
+  box-shadow:
+    0 0 14px var(--neon-glow),
+    inset 0 0 10px rgba(0, 255, 65, .10) !important;
+  text-shadow: 0 0 10px var(--neon-glow);
+}
+
+.ptz-btn:active { transform: scale(.95); }
+
+/* Halo de retroiluminación en hover */
+.ptz-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(0, 255, 65, .22) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity .1s;
+  pointer-events: none;
+}
+.ptz-btn:hover::after { opacity: 1; }
+
+/* ── Botón PTZ STOP — ámbar ─────────────────────────────────── */
+.ptz-btn-stop {
+  background: rgba(5, 2, 0, .85) !important;
+  border: 1px solid var(--amber) !important;
+  color: var(--amber) !important;
+  border-radius: 0 !important;
+  font-size: 1rem !important;
+  padding: .5rem !important;
+  transition: all .12s ease !important;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.ptz-btn-stop:hover {
+  background: rgba(255, 179, 0, .08) !important;
+  border-color: var(--amber) !important;
+  color: var(--amber) !important;
+  box-shadow:
+    0 0 16px var(--amber-glow),
+    inset 0 0 10px rgba(255, 179, 0, .10) !important;
+  text-shadow: 0 0 8px var(--amber-glow);
+}
+
+.ptz-btn-stop:active { transform: scale(.95); }
+
+.ptz-btn-stop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(255, 179, 0, .28) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity .1s;
+  pointer-events: none;
+}
+.ptz-btn-stop:hover::after { opacity: 1; }
+
+/* ── Botones generales Bootstrap override ───────────────────── */
+.btn {
+  border-radius: 0 !important;
+  font-family: var(--ff-mono) !important;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-size: .74rem !important;
+  transition: all .15s ease !important;
+}
+
+.btn-outline-light {
+  border-color: var(--bd-bright) !important;
+  color: var(--mut2) !important;
+  background: transparent !important;
+}
+.btn-outline-light:hover {
+  background: var(--neon-faint) !important;
+  border-color: var(--neon-dim) !important;
+  color: var(--neon) !important;
+  box-shadow: 0 0 10px var(--neon-trace) !important;
+}
+
+.btn-outline-success {
+  border-color: var(--neon-dim) !important;
+  color: var(--neon) !important;
+  background: transparent !important;
+}
+.btn-outline-success:hover {
+  background: var(--neon-faint) !important;
+  border-color: var(--neon) !important;
+  color: var(--neon) !important;
+  box-shadow: 0 0 12px var(--neon-glow) !important;
+}
+
+.btn-outline-danger {
+  border-color: var(--amber) !important;
+  color: var(--amber) !important;
+  background: transparent !important;
+}
+.btn-outline-danger:hover {
+  background: var(--amber-faint) !important;
+  border-color: var(--amber) !important;
+  color: var(--amber) !important;
+  box-shadow: 0 0 12px var(--amber-glow) !important;
+}
+
+.btn-outline-warning {
+  border-color: var(--amber) !important;
+  color: var(--amber) !important;
+  background: transparent !important;
+}
+.btn-outline-warning:hover {
+  background: var(--amber-faint) !important;
+  color: var(--amber) !important;
+  box-shadow: 0 0 12px var(--amber-glow) !important;
+}
+
+/* ── Stream de video ────────────────────────────────────────── */
+.video-frame {
+  width: 100% !important;
+  background: #000 !important;
+  border: 1px solid var(--bd-bright) !important;
+  border-radius: 0 !important;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  /* Efecto fósforo sutil */
+  filter: brightness(.96) saturate(.88) contrast(1.06);
+  box-shadow:
+    0 0 0 1px var(--bg2),
+    0 0 24px rgba(0, 255, 65, .04) !important;
+}
+
+/* ── Estado / Status pill ───────────────────────────────────── */
+.status-pill {
+  font-family: var(--ff-mono) !important;
+  font-weight: 400 !important;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  font-size: .78rem !important;
+}
+
+.status-pill.ok {
+  color: var(--neon) !important;
+  text-shadow: 0 0 8px var(--neon-glow);
+}
+
+.status-pill.bad {
+  color: var(--amber) !important;
+  text-shadow: 0 0 8px var(--amber-glow);
+}
+
+/* ── Formularios ────────────────────────────────────────────── */
+.form-control,
+.form-select {
+  background: rgba(0, 10, 5, .88) !important;
+  color: var(--txt) !important;
+  border: 1px solid var(--bd-bright) !important;
+  border-radius: 0 !important;
+  font-family: var(--ff-mono) !important;
+  font-size: .84rem !important;
+}
+
+.form-control:focus,
+.form-select:focus {
+  background: rgba(0, 255, 65, .04) !important;
+  border-color: var(--neon-dim) !important;
+  box-shadow: 0 0 0 2px rgba(0, 255, 65, .16) !important;
+  color: var(--txt-bright) !important;
+  outline: none !important;
+}
+
+/* Botón selector de archivo */
+.form-control::file-selector-button {
+  background: rgba(0, 255, 65, .07) !important;
+  color: var(--neon-dim) !important;
+  border: 0 !important;
+  border-right: 1px solid var(--bd-bright) !important;
+  border-radius: 0 !important;
+  padding: .3rem .7rem;
+  cursor: pointer;
+  font-family: var(--ff-mono) !important;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  font-size: .72rem;
+  transition: background .15s;
+}
+.form-control::file-selector-button:hover {
+  background: rgba(0, 255, 65, .14) !important;
+  color: var(--neon) !important;
+}
+
+/* ── Switch — tracking / inspección ────────────────────────── */
+.form-check-input {
+  background-color: rgba(0, 0, 0, .65) !important;
+  border: 1px solid var(--bd-bright) !important;
+  border-radius: 2px !important;
+}
+.form-check-input:checked {
+  background-color: var(--neon) !important;
+  border-color: var(--neon) !important;
+  box-shadow: 0 0 8px var(--neon-glow) !important;
+}
+.form-check-input:focus {
+  box-shadow: 0 0 0 2px rgba(0, 255, 65, .20) !important;
+}
+
+/* ── Barra de progreso global ───────────────────────────────── */
+.progress {
+  background: rgba(0, 0, 0, .65) !important;
+  border: 1px solid var(--bd-mid) !important;
+  border-radius: 0 !important;
+  height: 10px !important;
+}
+
+.progress-bar {
+  background: linear-gradient(90deg, var(--neon-dim), var(--neon)) !important;
+  box-shadow: 0 0 8px var(--neon-glow) !important;
+  border-radius: 0 !important;
+  font-size: .6rem !important;
+  font-family: var(--ff-mono) !important;
+  color: var(--bg0) !important;
+  font-weight: 700;
+}
+
+.progress-bar.bg-warning {
+  background: linear-gradient(90deg, var(--amber), var(--amber-hot)) !important;
+  box-shadow: 0 0 8px var(--amber-glow) !important;
+}
+
+/* ── Alertas Bootstrap (flash messages) ─────────────────────── */
+.alert {
+  border-radius: 0 !important;
+  font-family: var(--ff-mono) !important;
+  font-size: .76rem !important;
+  border-left-width: 3px !important;
+  padding: .4rem .7rem !important;
+}
+.alert-success {
+  background: rgba(0, 255, 65, .06) !important;
+  border-color: var(--neon-dim) !important;
+  color: var(--neon) !important;
+}
+.alert-danger {
+  background: var(--bad-faint) !important;
+  border-color: var(--bad) !important;
+  color: var(--bad) !important;
+}
+.alert-secondary {
+  background: rgba(0, 0, 0, .5) !important;
+  border-color: var(--bd-mid) !important;
+  color: var(--mut2) !important;
+}
+
+/* ── Tabla de alertas recientes ─────────────────────────────── */
+.table {
+  color: var(--txt) !important;
+  font-family: var(--ff-mono) !important;
+  font-size: .73rem !important;
+  border-color: var(--bd-mid) !important;
+  --bs-table-bg: transparent !important;
+  --bs-table-hover-bg: rgba(0, 255, 65, .04) !important;
+}
+
+.table thead th {
+  color: var(--neon-dim) !important;
+  border-bottom: 1px solid var(--bd-bright) !important;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-size: .66rem !important;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.table td,
+.table th {
+  border-color: var(--bd) !important;
+  padding: .28rem .5rem !important;
+  vertical-align: middle;
+}
+
+.table-dark {
+  background: transparent !important;
+  --bs-table-bg: transparent !important;
+}
+
+.table-hover tbody tr:hover td {
+  background: rgba(0, 255, 65, .04) !important;
+  color: var(--txt-bright) !important;
+}
+
+/* Botón "Ver" en tabla */
+.btn-outline-warning.btn-sm {
+  padding: .12rem .4rem !important;
+  font-size: .62rem !important;
+  border-color: var(--amber) !important;
+  color: var(--amber) !important;
+}
+.btn-outline-warning.btn-sm:hover {
+  background: var(--amber-faint) !important;
+  box-shadow: 0 0 8px var(--amber-glow) !important;
+}
+
+/* ── Modales ────────────────────────────────────────────────── */
+.modal-content {
+  background: var(--bg1) !important;
+  border: 1px solid var(--bd-bright) !important;
+  border-radius: 0 !important;
+  color: var(--txt) !important;
+  position: relative;
+}
+/* Corner brackets en modal también */
+.modal-content::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+  background:
+    linear-gradient(var(--neon), var(--neon)) top    left  / var(--cs) var(--ct) no-repeat,
+    linear-gradient(var(--neon), var(--neon)) top    left  / var(--ct) var(--cs) no-repeat,
+    linear-gradient(var(--neon), var(--neon)) top    right / var(--cs) var(--ct) no-repeat,
+    linear-gradient(var(--neon), var(--neon)) top    right / var(--ct) var(--cs) no-repeat,
+    linear-gradient(var(--neon), var(--neon)) bottom left  / var(--cs) var(--ct) no-repeat,
+    linear-gradient(var(--neon), var(--neon)) bottom left  / var(--ct) var(--cs) no-repeat,
+    linear-gradient(var(--neon), var(--neon)) bottom right / var(--cs) var(--ct) no-repeat,
+    linear-gradient(var(--neon), var(--neon)) bottom right / var(--ct) var(--cs) no-repeat;
+}
+
+.modal-header {
+  background: rgba(0, 0, 0, .62) !important;
+  border-bottom: 1px solid var(--bd-bright) !important;
+  position: relative;
+  z-index: 11;
+}
+
+.modal-body { position: relative; z-index: 11; }
+
+.modal-footer {
+  background: rgba(0, 0, 0, .42) !important;
+  border-top: 1px solid var(--bd) !important;
+  position: relative;
+  z-index: 11;
+}
+
+.btn-close {
+  filter: invert(1) sepia(1) saturate(5) hue-rotate(90deg) brightness(.7) !important;
+  opacity: .8 !important;
+}
+.btn-close:hover { opacity: 1 !important; }
+
+/* ── Separador HR ───────────────────────────────────────────── */
+hr {
+  border-color: var(--bd-mid) !important;
+  opacity: 1 !important;
+}
+
+/* ── Scrollbar personalizada ────────────────────────────────── */
+::-webkit-scrollbar          { width: 5px; height: 5px; }
+::-webkit-scrollbar-track    { background: var(--bg0); }
+::-webkit-scrollbar-thumb    { background: var(--bd-bright); border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: var(--neon-pale); }
+
+/* ── Indicador de progreso global ───────────────────────────── */
+#globalProgressWrap .card-body .small,
+#globalProgressWrap .card-body span {
+  color: var(--mut2) !important;
+  font-size: .72rem !important;
+}
+#globalProgressWrap #globalProgressText {
+  color: var(--neon) !important;
+  text-shadow: 0 0 6px var(--neon-glow);
+  font-size: .75rem;
+}
+#globalProgressWrap #globalProgressStatus { color: var(--neon-dim) !important; }
+
+/* ── Badge de hardware detectado ────────────────────────────── */
+#hwBadge {
+  background: rgba(0, 0, 0, .7) !important;
+  border: 1px solid var(--bd-bright) !important;
+  color: var(--neon-dim) !important;
+  border-radius: 0 !important;
+  font-size: .68rem !important;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: .2rem .55rem !important;
+}
+
+/* ── Nota de pie en paneles ─────────────────────────────────── */
+.form-text {
+  color: var(--mut2) !important;
+  font-size: .66rem !important;
+  letter-spacing: .03em;
+}
+
+/* ── Tab content ────────────────────────────────────────────── */
+.tab-content { padding-top: 1rem; }
+
+/* ── Top detections grid ────────────────────────────────────── */
+#topDetectionsSection h6 {
+  color: var(--neon-dim) !important;
+  font-family: var(--ff-head) !important;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-size: .72rem !important;
+}
+
+/* ── Animaciones ────────────────────────────────────────────── */
+
+/* Pulso rojo — alerta confirmada */
+@keyframes alertPulse {
+  0%   { box-shadow: 0 0 0   rgba(255, 61, 0, .0); }
+  50%  { box-shadow: 0 0 22px rgba(255, 61, 0, .55); }
+  100% { box-shadow: 0 0 0   rgba(255, 61, 0, .0); }
+}
+
+/* Pulso ámbar — estado crítico */
+@keyframes amberPulse {
+  0%   { box-shadow: 0 0 0   rgba(255, 179, 0, .0); }
+  50%  { box-shadow: 0 0 24px rgba(255, 179, 0, .55); }
+  100% { box-shadow: 0 0 0   rgba(255, 179, 0, .0); }
+}
+
+/* Parpadeo neón — indicadores activos */
+@keyframes neonBlink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .45; }
+}
+
+/* Entrada de panel */
+@keyframes bootIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.alert-blink  { animation: alertPulse  1.10s ease-in-out infinite; }
+.amber-pulse  { animation: amberPulse  1.20s ease-in-out infinite; }
+.neon-blink   { animation: neonBlink   1.40s ease-in-out infinite; }
+.boot-in      { animation: bootIn       .35s ease-out both; }

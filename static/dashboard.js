@@ -1,10 +1,11 @@
 (() => {
   const byId = (id) => document.getElementById(id);
+  let lastPtzWarning = "";
 
   const fetchJson = async (url, opts = {}) => {
     const res = await fetch(url, {
       credentials: "same-origin",
-      headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+      headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest", ...(opts.headers || {}) },
       ...opts,
     });
     if (!res.ok) throw new Error(`${res.status}`);
@@ -53,6 +54,14 @@
     setText("sCount", String(count));
     setText("sConf", fmtPct(conf));
     setText("sLast", last);
+
+    const warn = data.ptz_warning ? String(data.ptz_warning) : "";
+    if (warn && warn !== lastPtzWarning) {
+      lastPtzWarning = warn;
+      showFlash("warning", warn);
+    } else if (!warn) {
+      lastPtzWarning = "";
+    }
   };
 
   const renderAlerts = (alerts) => {
@@ -127,10 +136,44 @@
       if (el) el.addEventListener("click", fn);
     };
 
-    bind("ptzUp", () => postJson("/ptz_move", { direction: "up" }));
-    bind("ptzDown", () => postJson("/ptz_move", { direction: "down" }));
-    bind("ptzLeft", () => postJson("/ptz_move", { direction: "left" }));
-    bind("ptzRight", () => postJson("/ptz_move", { direction: "right" }));
+    const bindHoldMove = (id, vec) => {
+      const el = byId(id);
+      if (!el) return;
+
+      let timer = null;
+      let stopSent = false;
+      const send = () => postJson("/ptz_move", { ...vec, duration_s: 0.6 });
+
+      const start = (ev) => {
+        ev?.preventDefault?.();
+        if (timer) return;
+        stopSent = false;
+        send();
+        timer = window.setInterval(send, 450);
+      };
+
+      const stop = (ev) => {
+        ev?.preventDefault?.();
+        if (timer) {
+          window.clearInterval(timer);
+          timer = null;
+        }
+        if (stopSent) return;
+        stopSent = true;
+        postJson("/api/ptz_stop", {});
+      };
+
+      el.addEventListener("mousedown", start);
+      el.addEventListener("touchstart", start, { passive: false });
+      window.addEventListener("mouseup", stop);
+      window.addEventListener("touchend", stop);
+      el.addEventListener("mouseleave", stop);
+    };
+
+    bindHoldMove("ptzUp", { x: 0.0, y: 1.0, zoom: 0.0 });
+    bindHoldMove("ptzDown", { x: 0.0, y: -1.0, zoom: 0.0 });
+    bindHoldMove("ptzLeft", { x: -1.0, y: 0.0, zoom: 0.0 });
+    bindHoldMove("ptzRight", { x: 1.0, y: 0.0, zoom: 0.0 });
     bind("ptzStop", () => postJson("/ptz_stop", {}));
 
     const autoToggle = byId("autoTrackingToggle");
@@ -152,29 +195,47 @@
 
   let activeJob = null;
   const setBusy = (busy, msg) => {
-    byId("spinnerBox")?.classList.toggle("d-none", !busy);
-    byId("progressWrap")?.classList.toggle("d-none", !busy);
-    const upload = byId("btnUpload");
+    const wrap = byId("globalProgressWrap");
+    if (wrap) wrap.classList.toggle("d-none", !busy);
+    const spin = byId("globalSpinner");
+    if (spin) spin.style.display = busy ? "" : "none";
     const reset = byId("btnReset");
-    if (upload) upload.disabled = busy;
     if (reset) reset.disabled = busy;
-    const sm = byId("spinnerMsg");
-    if (sm && msg) sm.textContent = String(msg);
+    if (msg) setText("globalProgressStatus", String(msg));
+  };
+
+  const clearResultsUi = () => {
+    activeJob = null;
+    byId("resultImage")?.classList.add("d-none");
+    byId("resultVideo")?.classList.add("d-none");
+    byId("topDetectionsSection")?.classList.add("d-none");
+    byId("btnDownload")?.classList.add("d-none");
+    setText("mDet", "0");
+    setText("mConf", "0%");
+    setText("mFrames", "-");
+    setText("globalProgressText", "0%");
+    const bar = byId("globalProgressBar");
+    if (bar) {
+      bar.style.width = "0%";
+      bar.textContent = "0%";
+    }
+    setText("globalProgressStatus", "En espera");
+    const area = byId("flash-area");
+    if (area) area.innerHTML = "";
   };
 
   const resetManualUi = () => {
     activeJob = null;
     const inp = byId("fileInput");
     if (inp) inp.value = "";
-    byId("btnUpload")?.classList.add("d-none");
     setBusy(false);
-    setText("progressText", "0%");
-    const bar = byId("progressBar");
+    setText("globalProgressText", "0%");
+    const bar = byId("globalProgressBar");
     if (bar) {
       bar.style.width = "0%";
       bar.textContent = "0%";
     }
-    setText("progressStatus", "En espera");
+    setText("globalProgressStatus", "En espera");
     byId("resultImage")?.classList.add("d-none");
     byId("resultVideo")?.classList.add("d-none");
     byId("topDetectionsSection")?.classList.add("d-none");
@@ -238,16 +299,18 @@
         const status = String(data.status || "");
 
         const pct = `${Math.max(0, Math.min(100, Math.round(p)))}%`;
-        setText("progressText", pct);
-        const bar = byId("progressBar");
+        setText("globalProgressText", pct);
+        const bar = byId("globalProgressBar");
         if (bar) {
           bar.style.width = pct;
           bar.textContent = pct;
         }
-        setText("progressStatus", status || "Procesando");
+        setText("globalProgressStatus", status || "Procesando");
 
         if (done) {
           setBusy(false);
+          setText("globalProgressStatus", "Completado");
+          showFlash("success", "Completado");
           if (!data.success) {
             showFlash("danger", data.error || "Error");
             return;
@@ -298,19 +361,14 @@
 
   const bindManual = () => {
     const input = byId("fileInput");
-    const upload = byId("btnUpload");
     const reset = byId("btnReset");
-    if (!input || !upload || !reset) return;
+    if (!input || !reset) return;
 
-    input.addEventListener("change", () => {
-      const has = input.files && input.files.length > 0;
-      upload.classList.toggle("d-none", !has);
-    });
-
-    reset.addEventListener("click", () => resetManualUi());
-
-    upload.addEventListener("click", async () => {
+    const startUpload = async () => {
       if (!input.files || !input.files[0]) return;
+
+      clearResultsUi();
+
       const fd = new FormData();
       fd.append("file", input.files[0]);
 
@@ -330,21 +388,24 @@
         setBusy(false);
         showFlash("danger", "Error");
       }
+    };
+
+    input.addEventListener("change", () => {
+      const has = input.files && input.files.length > 0;
+      if (has) startUpload();
     });
+
+    reset.addEventListener("click", () => resetManualUi());
   };
 
   const boot = async () => {
     bindPtz();
     bindManual();
 
-    byId("btnRefresh")?.addEventListener("click", async () => {
-      await Promise.allSettled([updateStatus(), updateAlerts(), updateCameraUi()]);
-    });
-
     await Promise.allSettled([updateStatus(), updateAlerts(), updateCameraUi()]);
-    setInterval(() => updateStatus().catch(() => null), 1000);
-    setInterval(() => updateAlerts().catch(() => null), 2000);
-    setInterval(() => updateCameraUi().catch(() => null), 3000);
+    setInterval(() => updateStatus().catch(() => null), 2000);
+    setInterval(() => updateAlerts().catch(() => null), 4000);
+    setInterval(() => updateCameraUi().catch(() => null), 5000);
   };
 
   if (document.readyState === "loading") {
@@ -353,4 +414,3 @@
     boot().catch(() => null);
   }
 })();
-

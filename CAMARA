@@ -1,0 +1,47 @@
+from onvif import ONVIFCamera
+import time
+
+IP = '192.168.1.64'
+USER = 'admin'
+PASS = 'Hitmank98'
+
+def move_hikvision_no_space():
+    try:
+        mycam = ONVIFCamera(IP, 80, USER, PASS)
+        ptz = mycam.create_ptz_service()
+        media = mycam.create_media_service()
+        profile = media.GetProfiles()[0]
+        token = profile.token
+
+        # Creamos la petición de movimiento
+        request = ptz.create_type('ContinuousMove')
+        request.ProfileToken = token
+        
+        # Obtenemos la estructura de velocidad
+        status = ptz.GetStatus({'ProfileToken': token})
+        request.Velocity = status.Position 
+
+        # --- LIMPIEZA DE "SPACES" (CRÍTICO PARA HIKVISION) ---
+        # Eliminamos las referencias a espacios de coordenadas que causan el error
+        request.Velocity.PanTilt.space = None
+        if hasattr(request.Velocity, 'Zoom'):
+            request.Velocity.Zoom.space = None
+
+        # Asignamos velocidades puras
+        request.Velocity.PanTilt.x = 0.5  # Derecha
+        request.Velocity.PanTilt.y = 0
+        request.Velocity.Zoom.x = 0
+        
+        print("[VIGÍA] Espacios limpiados. Iniciando movimiento...")
+        ptz.ContinuousMove(request)
+        
+        time.sleep(2)
+        
+        ptz.Stop({'ProfileToken': token})
+        print("[ÉXITO] El motor respondió correctamente.")
+
+    except Exception as e:
+        print(f"ERROR: {e}")
+
+if __name__ == "__main__":
+    move_hikvision_no_space()

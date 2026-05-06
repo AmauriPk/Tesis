@@ -3,66 +3,32 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RPAS Micro | Dashboard</title>
+    <title>VIGÍA // Centro de Operaciones</title>
+
+    <!-- Preconexión de fuentes para reducir latencia -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap" rel="stylesheet" />
 
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
     <link rel="stylesheet" href="/static/style.css" />
-
-    <style>
-        :root{
-            --bg0:#0b0e14;
-            --bg1:#161b22;
-            --bd:#30363d;
-            --txt:#ffffff;
-            --mut:#ffffff;
-            --ok:#00d4aa;
-            --warn:#ffaa00;
-            --bad:#ff4444;
-        }
-        body{ background:var(--bg0); color:var(--txt); }
-        .navbar{ background:rgba(18,24,29,.95); border-bottom:1px solid var(--bd); }
-        .card{ background:var(--bg1); border:1px solid var(--bd); }
-        .card-header{ background:rgba(11,14,20,.85); border-bottom:1px solid var(--bd); color:var(--mut); font-weight:700; }
-        .badge-role{ border:1px solid var(--bd); }
-        .tab-content{ padding-top:1rem; }
-        .video-frame{ width:100%; background:#000; border:1px solid var(--bd); border-radius:.5rem; }
-        .status-pill{ font-weight:700; letter-spacing:.3px; }
-        .status-pill.ok{ color:var(--ok); }
-        .status-pill.bad{ color:var(--bad); }
-        .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-
-        /* Accesibilidad/alto contraste */
-        label, .form-label, h1, h2, h3, p, span{ color:#ffffff !important; opacity:1 !important; }
-        .form-label{ display:block !important; }
-        .form-control, .form-select{ border:1px solid #30363d !important; background:#0f141b !important; color:#ffffff !important; }
-        .form-control:focus, .form-select:focus{ box-shadow:none !important; border-color:#ffffff !important; }
-
-        @keyframes alertPulse {
-            0% { box-shadow: 0 0 0 rgba(255,68,68,.0); }
-            50% { box-shadow: 0 0 18px rgba(255,68,68,.45); }
-            100% { box-shadow: 0 0 0 rgba(255,68,68,.0); }
-        }
-        .alert-blink {
-            animation: alertPulse 1.1s ease-in-out infinite;
-        }
-    </style>
 </head>
 <body>
     <nav class="navbar navbar-expand-lg sticky-top">
         <div class="container-fluid">
-            <a class="navbar-brand text-light fw-bold" href="#">
-                <i class="fa-solid fa-shield-halved me-2 text-success"></i>RPAS Micro
+            <a class="navbar-brand vigia-brand" href="#">
+                <i class="fa-solid fa-crosshairs me-2"></i>VIGÍA
             </a>
             <div class="ms-auto d-flex align-items-center gap-2">
                 {% if is_admin %}
                     <a class="btn btn-sm btn-outline-warning" href="{{ url_for('admin_dashboard') }}">
-                        <i class="fa-solid fa-screwdriver-wrench me-1"></i> Configuración de Cámara
+                        <i class="fa-solid fa-screwdriver-wrench me-1"></i> Config. Cámara
                     </a>
                 {% endif %}
-                <span class="badge badge-role text-bg-dark">
+                <span class="badge badge-role">
                     <i class="fa-solid fa-user me-1"></i>{{ current_user.username }}
-                    <span class="text-secondary">|</span>
+                    <span class="text-secondary"> | </span>
                     <span class="mono">{{ current_user.role }}</span>
                 </span>
                 <a class="btn btn-sm btn-outline-light" href="{{ url_for('logout') }}">
@@ -72,76 +38,84 @@
         </div>
     </nav>
 
+    <!-- Indicador global de estado — procesamiento de flujo manual -->
+    <div class="container-fluid pt-3">
+        <div id="globalProgressWrap" class="card d-none boot-in">
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div class="small">
+                        <i class="fa-solid fa-circle-notch fa-spin me-1 text-secondary" id="globalSpinner" style="display:none;"></i>
+                        <span id="globalProgressStatus">En espera</span>
+                    </div>
+                    <span class="mono" id="globalProgressText">0%</span>
+                </div>
+                <div class="progress mt-2" role="progressbar" aria-label="Progreso de procesamiento de flujo">
+                    <div id="globalProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning" style="width: 0%">0%</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="container-fluid py-3">
         <ul class="nav nav-tabs" role="tablist">
             <li class="nav-item" role="presentation">
-                <button class="nav-link {% if active_tab == 'manual' %}active{% endif %}" id="manual-tab" data-bs-toggle="tab" data-bs-target="#manual"
-                        type="button" role="tab" aria-controls="manual" aria-selected="{{ 'true' if active_tab == 'manual' else 'false' }}">
-                    <i class="fa-solid fa-upload me-1"></i> Detección Manual
+                <button class="nav-link {% if active_tab == 'manual' %}active{% endif %}"
+                        id="manual-tab" data-bs-toggle="tab" data-bs-target="#manual"
+                        type="button" role="tab"
+                        aria-controls="manual" aria-selected="{{ 'true' if active_tab == 'manual' else 'false' }}">
+                    <i class="fa-solid fa-upload me-1"></i> Análisis Manual
                 </button>
             </li>
             <li class="nav-item" role="presentation">
-                <button class="nav-link {% if active_tab == 'live' %}active{% endif %}" id="live-tab" data-bs-toggle="tab" data-bs-target="#live"
-                        type="button" role="tab" aria-controls="live" aria-selected="{{ 'true' if active_tab == 'live' else 'false' }}">
-                    <i class="fa-solid fa-video me-1"></i> Monitoreo en Vivo
+                <button class="nav-link {% if active_tab == 'live' %}active{% endif %}"
+                        id="live-tab" data-bs-toggle="tab" data-bs-target="#live"
+                        type="button" role="tab"
+                        aria-controls="live" aria-selected="{{ 'true' if active_tab == 'live' else 'false' }}">
+                    <i class="fa-solid fa-satellite-dish me-1"></i> Procesamiento de Flujo
                 </button>
             </li>
         </ul>
 
         <div class="tab-content">
-            <!-- ================= MANUAL ================= -->
-            <div class="tab-pane fade {% if active_tab == 'manual' %}show active{% endif %}" id="manual" role="tabpanel" aria-labelledby="manual-tab">
+
+            <!-- ═══════════════ ANÁLISIS MANUAL ═══════════════ -->
+            <div class="tab-pane fade {% if active_tab == 'manual' %}show active{% endif %}"
+                 id="manual" role="tabpanel" aria-labelledby="manual-tab">
                 <div class="row g-3">
+
+                    <!-- Panel de carga -->
                     <div class="col-xl-4">
                         <div class="card">
                             <div class="card-header">
-                                <i class="fa-solid fa-file-arrow-up me-1"></i> Subir imagen/video (GPU)
+                                <i class="fa-solid fa-file-arrow-up"></i> Subir imagen / video
                             </div>
                             <div class="card-body">
                                 <div id="flash-area"></div>
                                 <div class="mb-3">
-                                    <label class="form-label">Archivo (.jpg/.png o .mp4)</label>
-                                    <input class="form-control" type="file" id="fileInput" accept=".jpg,.jpeg,.png,.mp4,.avi,.mov" />
+                                    <label class="form-label">Archivo (.jpg / .png / .mp4)</label>
+                                    <input class="form-control" type="file" id="fileInput"
+                                           accept=".jpg,.jpeg,.png,.mp4,.avi,.mov" />
                                 </div>
                                 <div class="d-flex gap-2">
-                                    <button class="btn btn-success w-100 d-none" id="btnUpload" type="button">
-                                        <i class="fa-solid fa-bolt me-1"></i> Ejecutar detección
-                                    </button>
-                                    <button class="btn btn-outline-light" id="btnReset" type="button">
-                                        <i class="fa-solid fa-rotate me-1"></i>
+                                    <button class="btn btn-outline-light" id="btnReset" type="button"
+                                            title="Limpiar">
+                                        <i class="fa-solid fa-rotate me-1"></i> Limpiar
                                     </button>
                                 </div>
-
-                                <div class="mt-3 d-none" id="spinnerBox">
-                                    <div class="d-flex align-items-center gap-2">
-                                        <div class="spinner-border text-warning" role="status"></div>
-                                        <div class="text-secondary" id="spinnerMsg">Procesando en GPU... (cuda:0)</div>
-                                    </div>
-                                </div>
-
-                                <div class="mt-3 d-none" id="progressWrap">
-                                    <div class="d-flex justify-content-between small mb-1">
-                                        <span class="text-secondary">Progreso</span>
-                                        <span class="mono" id="progressText">0%</span>
-                                    </div>
-                                    <div class="progress" role="progressbar" aria-label="Progreso de detección">
-                                        <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning" style="width: 0%">0%</div>
-                                    </div>
-                                    <div class="small text-secondary mt-1" id="progressStatus">En espera</div>
-                                </div>
-
-                                <hr class="border-secondary" />
-                                <div class="small text-secondary">
-                                    Los resultados se guardan en <span class="mono">static/results/</span> y se muestran automáticamente.
+                                <hr />
+                                <div class="form-text">
+                                    Resultados en <span class="mono-neon">static/results/</span> —
+                                    modelo de visión activo.
                                 </div>
                             </div>
                         </div>
                     </div>
 
+                    <!-- Panel de resultado -->
                     <div class="col-xl-8">
                         <div class="card">
                             <div class="card-header">
-                                <i class="fa-solid fa-satellite-dish me-1"></i> Resultado
+                                <i class="fa-solid fa-crosshairs"></i> Resultado del modelo de visión
                             </div>
                             <div class="card-body">
                                 <div class="row g-3 align-items-start">
@@ -151,31 +125,31 @@
                                             <source id="resultVideoSource" type="video/mp4" />
                                         </video>
                                         <div class="mt-3 d-none" id="topDetectionsSection">
-                                            <h6 class="mb-2">Top 10 Detecciones (Mayor Confianza)</h6>
+                                            <h6 class="mb-2">Top 10 Detecciones — Mayor Confianza</h6>
                                             <div class="row g-2" id="topDetectionsGrid"></div>
                                         </div>
                                     </div>
                                     <div class="col-lg-4">
                                         <div class="card">
-                                    <div class="card-header">Métricas</div>
-                                    <div class="card-body">
-                                        <div class="d-flex justify-content-between">
-                                            <span class="text-secondary">Detecciones</span>
-                                            <span class="metric-value" id="mDet">0</span>
-                                        </div>
-                                        <div class="d-flex justify-content-between">
-                                            <span class="text-secondary">Confianza prom.</span>
-                                            <span class="metric-value" id="mConf">0%</span>
-                                        </div>
-                                        <div class="d-flex justify-content-between">
-                                            <span class="text-secondary">Frames</span>
-                                            <span class="metric-value" id="mFrames">-</span>
-                                        </div>
-                                                <div class="mt-3">
-                                                    <a class="btn btn-outline-warning w-100 d-none" id="btnDownload" target="_blank">
-                                                        <i class="fa-solid fa-download me-1"></i> Abrir/Descargar
-                                                    </a>
+                                            <div class="card-header">
+                                                <i class="fa-solid fa-chart-bar"></i> Métricas
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="d-flex justify-content-between mb-2">
+                                                    <span class="text-secondary">Detecciones</span>
+                                                    <span class="metric-value" id="mDet">0</span>
                                                 </div>
+                                                <div class="d-flex justify-content-between mb-2">
+                                                    <span class="text-secondary">Confianza prom.</span>
+                                                    <span class="metric-value" id="mConf">0%</span>
+                                                </div>
+                                                <div class="d-flex justify-content-between mb-3">
+                                                    <span class="text-secondary">Frames</span>
+                                                    <span class="metric-value" id="mFrames">—</span>
+                                                </div>
+                                                <a class="btn btn-outline-warning w-100 d-none" id="btnDownload" target="_blank">
+                                                    <i class="fa-solid fa-download me-1"></i> Descargar
+                                                </a>
                                             </div>
                                         </div>
                                     </div>
@@ -186,95 +160,101 @@
                 </div>
             </div>
 
-            <!-- ================= LIVE ================= -->
-            <div class="tab-pane fade {% if active_tab == 'live' %}show active{% endif %}" id="live" role="tabpanel" aria-labelledby="live-tab">
+            <!-- ═══════════════ PROCESAMIENTO DE FLUJO ══════════ -->
+            <div class="tab-pane fade {% if active_tab == 'live' %}show active{% endif %}"
+                 id="live" role="tabpanel" aria-labelledby="live-tab">
                 <div class="row g-3">
+
+                    <!-- Feed RTSP -->
                     <div class="col-xl-8">
                         <div class="card">
                             <div class="card-header">
-                                <i class="fa-solid fa-eye me-1"></i> Live Feed (RTSP)
+                                <i class="fa-solid fa-eye"></i> Procesamiento de flujo — RTSP
                             </div>
                             <div class="card-body">
-                                <img id="liveImg" class="video-frame" src="/video_feed" alt="Stream en vivo" />
+                                <img id="liveImg" class="video-frame" src="/video_feed"
+                                     alt="Flujo de video en procesamiento" />
                             </div>
                         </div>
                     </div>
 
+                    <!-- Columna derecha: estado + PTZ -->
                     <div class="col-xl-4">
                         <div class="d-flex justify-content-between align-items-center mb-2">
-                            <span class="text-secondary">Hardware</span>
-                            <span id="hwBadge" class="badge text-bg-secondary">Cámara Detectada: --</span>
+                            <span class="text-secondary" style="font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;">Hardware</span>
+                            <span id="hwBadge" class="badge">Cámara: --</span>
                         </div>
+
+                        <!-- Panel de estado -->
                         <div class="card">
                             <div class="card-header">
-                                <i class="fa-solid fa-bell me-1"></i> Alertas / Estado
+                                <i class="fa-solid fa-bell"></i> Alertas / Estado
                             </div>
                             <div class="card-body">
                                 <div class="d-flex justify-content-between align-items-center mb-2">
-                                    <div class="text-secondary">Estado</div>
+                                    <span class="text-secondary">Estado</span>
                                     <div id="pillStatus" class="status-pill ok">Zona despejada</div>
                                 </div>
-                                <div class="d-flex justify-content-between">
+                                <div class="d-flex justify-content-between mb-1">
                                     <span class="text-secondary">Origen</span>
                                     <span class="mono-neon" id="sMode">fixed</span>
                                 </div>
-                                <div class="d-flex justify-content-between">
+                                <div class="d-flex justify-content-between mb-1">
                                     <span class="text-secondary">Detecciones</span>
                                     <span class="mono-neon" id="sCount">0</span>
                                 </div>
-                                <div class="d-flex justify-content-between">
+                                <div class="d-flex justify-content-between mb-1">
                                     <span class="text-secondary">Confianza</span>
                                     <span class="mono-neon" id="sConf">0%</span>
                                 </div>
                                 <div class="d-flex justify-content-between">
                                     <span class="text-secondary">Última</span>
-                                    <span class="mono-neon" id="sLast">-</span>
+                                    <span class="mono-neon" id="sLast">—</span>
                                 </div>
-
-                                <hr class="border-secondary" />
-                                <button class="btn btn-outline-light w-100" id="btnRefresh">
-                                    <i class="fa-solid fa-arrows-rotate me-1"></i> Actualizar
-                                </button>
                             </div>
                         </div>
 
+                        <!-- Panel de control PTZ -->
                         <div class="card mt-3" id="ptzPanel" style="display:none;">
                             <div class="card-header">
-                                <i class="fa-solid fa-arrows-to-circle me-1"></i> Panel de Control PTZ
+                                <i class="fa-solid fa-arrows-to-circle"></i> Control PTZ
                             </div>
                             <div class="card-body">
                                 <div class="d-flex justify-content-between align-items-center mb-3">
-                                    <span class="text-secondary">Tracking Automático</span>
+                                    <span class="text-secondary">Seguimiento — Modelo de visión</span>
                                     <div class="form-check form-switch m-0">
-                                        <input class="form-check-input" type="checkbox" role="switch" id="autoTrackingToggle" />
+                                        <input class="form-check-input" type="checkbox" role="switch"
+                                               id="autoTrackingToggle" />
                                     </div>
                                 </div>
                                 <div class="d-flex justify-content-between align-items-center mb-3">
-                                    <span class="text-secondary">Modo Inspección Automática</span>
+                                    <span class="text-secondary">Inspección automática</span>
                                     <div class="form-check form-switch m-0">
-                                        <input class="form-check-input" type="checkbox" role="switch" id="inspectionToggle" />
+                                        <input class="form-check-input" type="checkbox" role="switch"
+                                               id="inspectionToggle" />
                                     </div>
                                 </div>
 
-                                <div class="d-grid gap-2" style="grid-template-columns: 1fr 1fr 1fr;">
+                                <!-- Joystick PTZ -->
+                                <div class="d-grid gap-2" style="grid-template-columns:1fr 1fr 1fr;">
                                     <div></div>
-                                    <button class="btn btn-outline-success" id="ptzUp" type="button" title="Arriba">
+                                    <button class="btn ptz-btn" id="ptzUp" type="button" title="Arriba">
                                         <i class="fa-solid fa-chevron-up"></i>
                                     </button>
                                     <div></div>
 
-                                    <button class="btn btn-outline-success" id="ptzLeft" type="button" title="Izquierda">
+                                    <button class="btn ptz-btn" id="ptzLeft" type="button" title="Izquierda">
                                         <i class="fa-solid fa-chevron-left"></i>
                                     </button>
-                                    <button class="btn btn-outline-danger" id="ptzStop" type="button" title="Stop">
+                                    <button class="btn ptz-btn-stop" id="ptzStop" type="button" title="Detener">
                                         <i class="fa-solid fa-stop"></i>
                                     </button>
-                                    <button class="btn btn-outline-success" id="ptzRight" type="button" title="Derecha">
+                                    <button class="btn ptz-btn" id="ptzRight" type="button" title="Derecha">
                                         <i class="fa-solid fa-chevron-right"></i>
                                     </button>
 
                                     <div></div>
-                                    <button class="btn btn-outline-success" id="ptzDown" type="button" title="Abajo">
+                                    <button class="btn ptz-btn" id="ptzDown" type="button" title="Abajo">
                                         <i class="fa-solid fa-chevron-down"></i>
                                     </button>
                                     <div></div>
@@ -283,10 +263,11 @@
                         </div>
                     </div>
 
+                    <!-- Panel de alertas recientes -->
                     <div class="col-xl-4">
                         <div class="card">
                             <div class="card-header">
-                                <i class="fa-solid fa-bell me-1"></i> Panel de Alertas Recientes
+                                <i class="fa-solid fa-table-list"></i> Alertas Recientes
                             </div>
                             <div class="card-body">
                                 <div class="table-responsive">
@@ -305,52 +286,58 @@
                                         </tbody>
                                     </table>
                                 </div>
-                                <div class="form-text text-secondary mt-2">
-                                    Se actualiza cada ~4s. Las alertas &lt;10s se resaltan.
+                                <div class="form-text mt-2">
+                                    Actualización automática. Modelo de visión activo.
                                 </div>
                             </div>
                         </div>
                     </div>
+
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Modal para expandir imÃ¡genes (Top 10) -->
-    <div class="modal fade" id="imagenModal" tabindex="-1" aria-labelledby="imagenModalLabel" aria-hidden="true">
+    <!-- Modal: vista ampliada Top 10 -->
+    <div class="modal fade" id="imagenModal" tabindex="-1"
+         aria-labelledby="imagenModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered modal-xl">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="imagenModalLabel">
-                        <i class="fa-solid fa-image me-2"></i>Vista ampliada
+                        <i class="fa-solid fa-expand me-2"></i>Vista Ampliada — Detección
                     </h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"
+                            aria-label="Cerrar"></button>
                 </div>
                 <div class="modal-body">
                     <img id="imagenExpandida" src="" alt="Imagen expandida" class="img-fluid"
-                         style="max-width: 100%; max-height: 85vh; object-fit: contain; margin: auto; display: block;" />
+                         style="max-width:100%;max-height:85vh;object-fit:contain;margin:auto;display:block;" />
                 </div>
                 <div class="modal-footer justify-content-between">
-                    <span id="confianzaTexto" class="text-secondary">Nivel de confianza: --</span>
-                    <button type="button" class="btn btn-outline-light" data-bs-dismiss="modal">Cerrar</button>
+                    <span id="confianzaTexto" class="mono-neon">Confianza: —</span>
+                    <button type="button" class="btn btn-outline-light"
+                            data-bs-dismiss="modal">Cerrar</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Modal: Evidencia de DetecciÃ³n (Panel de Alertas) -->
-    <div class="modal fade" id="evidenceModal" tabindex="-1" aria-labelledby="evidenceModalLabel" aria-hidden="true">
+    <!-- Modal: evidencia de detección -->
+    <div class="modal fade" id="evidenceModal" tabindex="-1"
+         aria-labelledby="evidenceModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered modal-lg">
-            <div class="modal-content bg-dark text-light border border-secondary">
+            <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="evidenceModalLabel">
-                        <i class="fa-solid fa-camera me-2"></i>Evidencia de DetecciÃ³n
+                        <i class="fa-solid fa-camera me-2"></i>Evidencia de Detección
                     </h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"
+                            aria-label="Cerrar"></button>
                 </div>
                 <div class="modal-body">
-                    <img id="evidenceImage" src="" class="img-fluid rounded" alt="Evidencia de detecciÃ³n" />
-                    <div id="evidenceMeta" class="small text-secondary mt-2"></div>
+                    <img id="evidenceImage" src="" class="img-fluid" alt="Evidencia" />
+                    <div id="evidenceMeta" class="form-text mt-2"></div>
                 </div>
             </div>
         </div>

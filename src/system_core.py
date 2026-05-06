@@ -167,14 +167,30 @@ class CameraConfig(db.Model):
 
 
 class PTZController:
-    def __init__(self, host: str, port: int = 80, username: str | None = None, password: str | None = None):
+    def __init__(
+        self,
+        host: str,
+        port: int = 80,
+        username: str | None = None,
+        password: str | None = None,
+        *,
+        preferred_profile_token: str | None = None,
+    ):
         self.host = host
         self.port = port
         self.username = username or ""
         self.password = password or ""
+        self.preferred_profile_token = (preferred_profile_token or "").strip() or None
         self._ptz = None
         self._media = None
         self._profile = None
+        self._is_moving = False
+
+    def _reset_session(self) -> None:
+        self._ptz = None
+        self._media = None
+        self._profile = None
+        self._is_moving = False
 
     def connect(self) -> None:
         try:
@@ -188,7 +204,27 @@ class PTZController:
         profiles = self._media.GetProfiles()
         if not profiles:
             raise RuntimeError("No se encontraron perfiles ONVIF.")
-        self._profile = profiles[0]
+        chosen = None
+        if self.preferred_profile_token:
+            for p in profiles:
+                if getattr(p, "token", None) == self.preferred_profile_token:
+                    chosen = p
+                    break
+        if chosen is None:
+            candidates = [p for p in profiles if getattr(p, "token", None) and getattr(p, "PTZConfiguration", None) is not None]
+            if candidates:
+                def _score(p) -> int:
+                    try:
+                        enc = getattr(p, "VideoEncoderConfiguration", None)
+                        res = getattr(enc, "Resolution", None) if enc is not None else None
+                        w = int(getattr(res, "Width", 0) or 0) if res is not None else 0
+                        h = int(getattr(res, "Height", 0) or 0) if res is not None else 0
+                        return max(0, w) * max(0, h)
+                    except Exception:
+                        return 0
+
+                chosen = max(candidates, key=_score)
+        self._profile = chosen or profiles[0]
 
     def test_connection(self) -> dict:
         start = time.time()
@@ -197,23 +233,84 @@ class PTZController:
         return {"ok": True, "elapsed_ms": elapsed_ms}
 
     def continuous_move(self, x: float = 0.0, y: float = 0.0, zoom: float = 0.0, duration_s: float = 0.2) -> None:
+        if abs(float(x)) < 1e-6 and abs(float(y)) < 1e-6 and abs(float(zoom)) < 1e-6:
+            self.stop()
+            return
+
         if not self._ptz or not self._profile:
             self.connect()
-        req = self._ptz.create_type("ContinuousMove")
-        req.ProfileToken = self._profile.token
-        req.Velocity = {"PanTilt": {"x": float(x), "y": float(y)}, "Zoom": {"x": float(zoom)}}
-        self._ptz.ContinuousMove(req)
+
+        def _send_once() -> None:
+            request = self._ptz.create_type("ContinuousMove")
+            request.ProfileToken = self._profile.token
+
+            status = None
+            try:
+                status = self._ptz.GetStatus({"ProfileToken": self._profile.token})
+            except Exception:
+                status = None
+
+            position = getattr(status, "Position", None) if status is not None else None
+            velocity = self._ptz.create_type("PTZSpeed")
+
+            # Hikvision: clonar estructura desde Position para mantener la forma esperada.
+            if position is not None:
+                if getattr(position, "PanTilt", None) is not None:
+                    velocity.PanTilt = position.PanTilt
+                if getattr(position, "Zoom", None) is not None:
+                    velocity.Zoom = position.Zoom
+
+            if getattr(velocity, "PanTilt", None) is None:
+                velocity.PanTilt = self._ptz.create_type("Vector2D")
+            if getattr(velocity, "Zoom", None) is None:
+                velocity.Zoom = self._ptz.create_type("Vector1D")
+
+            velocity.PanTilt.x = float(x)
+            velocity.PanTilt.y = float(y)
+            velocity.Zoom.x = float(zoom) if zoom is not None else 0.0
+
+            request.Velocity = velocity
+
+            # CRÍTICO (Hikvision): anular espacios de coordenadas antes de enviar.
+            request.Velocity.PanTilt.space = None
+            request.Velocity.Zoom.space = None
+
+            self._ptz.ContinuousMove(request)
+            self._is_moving = True
+
+        try:
+            _send_once()
+        except Exception as e:
+            fault_cls = None
+            try:
+                from zeep.exceptions import Fault as fault_cls  # type: ignore
+            except Exception:
+                fault_cls = None
+
+            if fault_cls is not None and isinstance(e, fault_cls):
+                msg = (str(e) or "").lower()
+                if "locked" in msg:
+                    raise RuntimeError("Hardware bloqueado: requiere reinicio fisico.") from e
+                self._reset_session()
+                self.connect()
+                _send_once()
+            else:
+                raise
+
         time.sleep(max(0.05, float(duration_s)))
         self.stop()
 
     def stop(self) -> None:
         if not self._ptz or not self._profile:
             return
+        if not self._is_moving:
+            return
         req = self._ptz.create_type("Stop")
         req.ProfileToken = self._profile.token
         req.PanTilt = True
         req.Zoom = True
         self._ptz.Stop(req)
+        self._is_moving = False
 
 
 # ======================== TELEMETRÃA (SQLite) ========================
@@ -396,4 +493,3 @@ class MetricsDBWriter:
                     con.close()
             except sqlite3.Error:
                 pass
-

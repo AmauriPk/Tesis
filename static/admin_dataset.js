@@ -46,7 +46,8 @@
     }
 
     for (const it of items) {
-      const src = `/api/dataset_image?path=${encodeURIComponent(it.path || it)}`;
+      const relId = it.id || it.path || it;
+      const src = it.url ? String(it.url) : `/api/dataset_image?path=${encodeURIComponent(relId)}`;
       const col = document.createElement("div");
       col.className = "col-6 col-md-4 col-lg-3";
       col.innerHTML = `
@@ -54,8 +55,8 @@
           <img class="img-fluid rounded" style="border:1px solid rgba(48,54,61,.6)" src="${src}" alt="Imagen" />
           <div class="card-body py-2">
             <div class="d-flex gap-2">
-              <button class="btn btn-sm btn-outline-success w-100" data-action="ok">Aprobada</button>
-              <button class="btn btn-sm btn-outline-danger w-100" data-action="bad">Rechazada</button>
+              <button class="btn btn-sm btn-outline-success w-100" data-action="positiva">Aprobada</button>
+              <button class="btn btn-sm btn-outline-danger w-100" data-action="negativa">Rechazada</button>
             </div>
           </div>
         </div>
@@ -66,7 +67,7 @@
           try {
             await fetchJson("/api/classify_image", {
               method: "POST",
-              body: JSON.stringify({ path: it.path || it, label: b.dataset.action }),
+              body: JSON.stringify({ id: relId, label: b.dataset.action }),
             });
             setAlert("datasetOk", "Actualizado.");
           } catch (e) {
@@ -101,7 +102,8 @@
         return;
       }
       for (const it of items) {
-        const src = `/api/classified_image?path=${encodeURIComponent(it.path || it)}`;
+        const relId = it.id || it.path || it;
+        const src = it.url ? String(it.url) : `/api/classified_image?path=${encodeURIComponent(relId)}`;
         const col = document.createElement("div");
         col.className = "col-6 col-md-4 col-lg-3";
         col.innerHTML = `
@@ -115,7 +117,7 @@
         col.querySelector("button[data-action='revert']")?.addEventListener("click", async () => {
           clearAlerts();
           try {
-            await fetchJson("/api/revert_classification", { method: "POST", body: JSON.stringify({ path: it.path || it }) });
+            await fetchJson("/api/revert_classification", { method: "POST", body: JSON.stringify({ path: relId }) });
             setAlert("historyOk", "Revertido.");
           } catch (e) {
             setAlert("historyErr", e?.data?.message || e?.data?.error || "Error");
@@ -140,4 +142,3 @@
     boot();
   }
 })();
-

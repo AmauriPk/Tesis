@@ -14,7 +14,7 @@ RTSP_CONFIG = {
     "url": os.environ.get("RTSP_URL", "0"),
     "username": os.environ.get("RTSP_USERNAME", "usuario"),
     "password": os.environ.get("RTSP_PASSWORD", "password"),
-    "timeout": _env_int("RTSP_TIMEOUT", 30),
+    "timeout": _env_int("RTSP_TIMEOUT", 10),
     "buffer_size": _env_int("RTSP_BUFFER_SIZE", 1),
 }
 
