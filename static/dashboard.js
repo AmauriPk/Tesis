@@ -470,22 +470,24 @@
             const src = byId("resultVideoSource");
             const playable = Boolean(data.result_video_playable ?? true);
             const vurl = String(data.result_video_url || url || "");
+            const rawUrl = String(data.result_video_raw_url || "");
             const mime = String(data.result_video_mime || "video/mp4");
             const cacheBustUrl = vurl
               ? `${vurl}${vurl.includes("?") ? "&" : "?"}v=${encodeURIComponent(`${jobId}-${Date.now()}`)}`
               : "";
 
-            const setDownload = (el) => {
+            const setDownload = (el, href) => {
               if (!el) return;
-              if (vurl) {
-                el.href = vurl;
+              if (href) {
+                el.href = href;
                 el.classList.remove("d-none");
               } else {
                 el.classList.add("d-none");
               }
             };
-            setDownload(btn);
-            setDownload(dlVideo);
+            // Descargar siempre debe apuntar al raw si está disponible (útil aunque el browser mp4 exista).
+            setDownload(btn, rawUrl || vurl);
+            setDownload(dlVideo, rawUrl || vurl);
 
             if (!cacheBustUrl) {
               vid?.classList.add("d-none");
