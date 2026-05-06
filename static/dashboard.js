@@ -187,7 +187,16 @@
 
     const autoToggle = byId("autoTrackingToggle");
     if (autoToggle) {
-      autoToggle.addEventListener("change", () => postJson("/api/auto_tracking", { enabled: autoToggle.checked }));
+      let autoRequestInFlight = false;
+      autoToggle.addEventListener("change", async () => {
+        if (autoRequestInFlight) return;
+        autoRequestInFlight = true;
+        try {
+          await postJson("/api/auto_tracking", { enabled: autoToggle.checked });
+        } finally {
+          autoRequestInFlight = false;
+        }
+      });
       fetchJson("/api/auto_tracking")
         .then((d) => (autoToggle.checked = Boolean(d.enabled)))
         .catch(() => null);
@@ -195,7 +204,16 @@
 
     const inspToggle = byId("inspectionToggle");
     if (inspToggle) {
-      inspToggle.addEventListener("change", () => postJson("/api/inspection_mode", { enabled: inspToggle.checked }));
+      let inspectionRequestInFlight = false;
+      inspToggle.addEventListener("change", async () => {
+        if (inspectionRequestInFlight) return;
+        inspectionRequestInFlight = true;
+        try {
+          await postJson("/api/inspection_mode", { enabled: inspToggle.checked });
+        } finally {
+          inspectionRequestInFlight = false;
+        }
+      });
       fetchJson("/api/inspection_mode")
         .then((d) => (inspToggle.checked = Boolean(d.enabled)))
         .catch(() => null);

@@ -610,8 +610,6 @@ class _InspectionPatrolWorker:
                 detected = bool(current_detection_state.get("detected"))
             # Si hay amenaza confirmada, detener inspecciÃ³n de inmediato (sin tocar tracking).
             if detected:
-                with state_lock:
-                    inspection_mode_enabled = False
                 ptz_worker.enqueue_stop()
                 self._patrolling = False
                 continue
@@ -623,6 +621,11 @@ class _InspectionPatrolWorker:
                 continue
             now = time.time()
             idle = (last_det is None) or ((now - float(last_det)) >= self._idle_s)
+            print(
+                "[INSPECTION]",
+                f"enabled={enabled} ptz_ready={bool(ptz_ok and configured_ptz)} detected={detected} idle={idle} "
+                f"moving={self._patrolling}",
+            )
             # Regla: inspección solo si no hay tracking activo, o si no hay detección confirmada.
             # Si hay detección confirmada, el tracking (si está activo) tiene prioridad.
             if tracking and detected:

@@ -174,6 +174,13 @@ def ptz_centering_vector(
     return x, y
 
 
+def _apply_min_ptz_speed(value: float, min_speed: float = 0.08, max_speed: float = 0.25) -> float:
+    if abs(float(value)) < 1e-6:
+        return 0.0
+    sign = 1.0 if float(value) > 0 else -1.0
+    return float(sign) * float(min(max(abs(float(value)), float(min_speed)), float(max_speed)))
+
+
 class RTSPLatestFrameReader:
     """Lee RTSP en un hilo y conserva sÃ³lo el Ãºltimo frame (drop de frames si hay lag)."""
 
@@ -601,10 +608,10 @@ class LiveVideoProcessor:
                     if priority is not None:
                         h, w = frame.shape[:2]
                         try:
-                            tolerance_frac = float(os.environ.get("PTZ_CENTER_TOLERANCE_FRAC", "0.30"))
+                            tolerance_frac = float(os.environ.get("PTZ_CENTER_TOLERANCE_FRAC", "0.12"))
                         except Exception:
-                            tolerance_frac = 0.30
-                        tolerance_frac = float(clamp(tolerance_frac, 0.25, 0.35))
+                            tolerance_frac = 0.12
+                        tolerance_frac = float(clamp(tolerance_frac, 0.08, 0.25))
                         x, y = ptz_centering_vector(
                             int(w),
                             int(h),
@@ -621,35 +628,59 @@ class LiveVideoProcessor:
                         sy = (alpha * float(y)) + ((1.0 - alpha) * float(ly))
                         self._last_ptz_cmd = (sx, sy)
 
-                        detected_flag = True
+                        detected_flag = False
                         try:
                             if self.state_lock is not None and self.detection_state is not None:
                                 with self.state_lock:
-                                    detected_flag = bool(self.detection_state.get("detected", True))
+                                    detected_flag = bool(self.detection_state.get("detected", False))
                         except Exception:
-                            detected_flag = True
+                            detected_flag = False
+
+                        if not detected_flag:
+                            if getattr(self, "_ptz_auto_was_moving", False) and self.ptz_stop is not None:
+                                self.ptz_stop()
+                            self._ptz_auto_was_moving = False
+                            continue
+
+                        bbox = tuple(priority["bbox"])
+                        dx, dy = bbox_offset_norm(int(w), int(h), bbox)
+
+                        pan_raw = float(sx)
+                        tilt_raw = float(sy)
+                        pan_cmd = _apply_min_ptz_speed(pan_raw, min_speed=0.08, max_speed=0.25)
+                        tilt_cmd = _apply_min_ptz_speed(tilt_raw, min_speed=0.08, max_speed=0.25)
+
+                        cx = (float(bbox[0]) + float(bbox[2])) / 2.0
+                        cy = (float(bbox[1]) + float(bbox[3])) / 2.0
+                        fx = float(int(w)) / 2.0
+                        fy = float(int(h)) / 2.0
 
                         print(
                             "[TRACKING]",
-                            f"bbox={priority.get('bbox')} frame=({int(w)},{int(h)}) pan={sx:.3f} tilt={sy:.3f} "
-                            f"detected={bool(detected_flag)} auto_tracking={bool(self.is_tracking_enabled())}",
+                            f"bbox={bbox} center=({cx:.1f},{cy:.1f}) frame_center=({fx:.1f},{fy:.1f}) "
+                            f"err=({dx:.3f},{dy:.3f}) pan_raw={pan_raw:.3f} tilt_raw={tilt_raw:.3f} "
+                            f"pan_cmd={pan_cmd:.3f} tilt_cmd={tilt_cmd:.3f} detected={bool(detected_flag)} "
+                            f"auto_tracking={bool(self.is_tracking_enabled())}",
                         )
 
-                        if abs(sx) < 0.03 and abs(sy) < 0.03:
-                            if self.ptz_stop is not None and (abs(lx) > 0.02 or abs(ly) > 0.02):
+                        if abs(pan_cmd) < 1e-6 and abs(tilt_cmd) < 1e-6:
+                            if getattr(self, "_ptz_auto_was_moving", False) and self.ptz_stop is not None:
                                 self.ptz_stop()
+                            self._ptz_auto_was_moving = False
                             continue
 
-                        if abs(sx) > 0.001 or abs(sy) > 0.001:
+                        if abs(pan_cmd) > 0.001 or abs(tilt_cmd) > 0.001:
                             self.ptz_move(
-                                x=float(clamp(sx, -0.25, 0.25)),
-                                y=float(clamp(sy, -0.25, 0.25)),
+                                x=float(clamp(pan_cmd, -0.25, 0.25)),
+                                y=float(clamp(tilt_cmd, -0.25, 0.25)),
                                 zoom=0.0,
                                 duration_s=0.14,
                             )
+                            self._ptz_auto_was_moving = True
                         else:
-                            if self.ptz_stop is not None and (abs(lx) > 0.02 or abs(ly) > 0.02):
+                            if getattr(self, "_ptz_auto_was_moving", False) and self.ptz_stop is not None:
                                 self.ptz_stop()
+                            self._ptz_auto_was_moving = False
             except Exception:
                 pass
 
