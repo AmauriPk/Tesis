@@ -3722,6 +3722,65 @@ def create_video_writer(output_path: str, fps: float, width: int, height: int):
     print("[VIDEO_WRITER][ERROR] no se pudo inicializar ningún codec")
     return None, None, None
 
+
+def transcode_to_browser_mp4(input_path: str, output_path: str) -> bool:
+    """
+    Intenta transcodificar `input_path` a un MP4 reproducible en navegador.
+
+    - No debe romper el análisis si falla.
+    - Preferimos libx264; fallback mpeg4 si libx264 no está disponible.
+    """
+    in_path = str(input_path)
+    out_path = str(output_path)
+
+    print(f"[VIDEO_TRANSCODE] input={in_path} output={out_path}")
+
+    # ffmpeg-python (requiere binario ffmpeg en PATH).
+    if ffmpeg is not None:
+        for vcodec in ("libx264", "mpeg4"):
+            try:
+                (
+                    ffmpeg.input(in_path)
+                    .output(out_path, vcodec=vcodec, pix_fmt="yuv420p", movflags="+faststart")
+                    .overwrite_output()
+                    .run(quiet=True)
+                )
+                print(f"[VIDEO_TRANSCODE] success=True codec={vcodec}")
+                return True
+            except Exception as e:
+                print(f"[VIDEO_TRANSCODE][WARN] codec={vcodec} failed err={str(e) or e.__class__.__name__}")
+                continue
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        print("[VIDEO_TRANSCODE] success=False reason=ffmpeg_missing")
+        return False
+
+    for vcodec in ("libx264", "mpeg4"):
+        try:
+            cmd = [
+                ffmpeg_bin,
+                "-y",
+                "-i",
+                in_path,
+                "-c:v",
+                vcodec,
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                out_path,
+            ]
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print(f"[VIDEO_TRANSCODE] success=True codec={vcodec}")
+            return True
+        except Exception as e:
+            print(f"[VIDEO_TRANSCODE][WARN] codec={vcodec} failed err={str(e) or e.__class__.__name__}")
+            continue
+
+    print("[VIDEO_TRANSCODE] success=False")
+    return False
+
 def _persist_top_detections_images(clean_dir: str, bb_dir: str, top_items: list[tuple[float, int, bytes, bytes]]) -> list[dict]:
     """Guarda Top 10 en limpio + con bounding box y devuelve al frontend SOLO las imÃ¡genes con bounding box.
 
@@ -3845,7 +3904,59 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
         except Exception:
             pass
 
-    # Nota: evitamos H.264/OpenH264 en Windows (solo codecs compatibles tipo mp4v/XVID/MJPG).
+    # Validar salida de video (existencia/tamaño). Si no existe o pesa 0, no marcar como reproducible.
+    result_video_path = wrote_to if (out is not None and wrote_to) else None
+    result_video_size = 0
+    if result_video_path:
+        try:
+            if os.path.exists(result_video_path):
+                result_video_size = int(os.path.getsize(result_video_path) or 0)
+        except Exception:
+            result_video_size = 0
+
+    print(f"[VIDEO_OUTPUT] path={result_video_path} size={int(result_video_size)}")
+    if result_video_path and int(result_video_size) <= 0:
+        video_output_warning = "No se pudo generar un video reproducible de salida (archivo vacío)."
+        result_video_path = None
+
+    # Si el writer generó AVI, intentar transcodificar a MP4 reproducible si hay ffmpeg.
+    final_video_path = result_video_path
+    final_mime = None
+    final_playable = False
+    if final_video_path:
+        ext = os.path.splitext(str(final_video_path).lower())[1]
+        if ext == ".mp4":
+            final_mime = "video/mp4"
+            final_playable = True
+        elif ext == ".avi":
+            # AVI puede no ser reproducible en navegador: intentar convertir a MP4.
+            mp4_target = out_path
+            try:
+                ok = transcode_to_browser_mp4(final_video_path, mp4_target)
+            except Exception as e:
+                print(f"[VIDEO_TRANSCODE][ERROR] {str(e) or e.__class__.__name__}")
+                ok = False
+            if ok and os.path.exists(mp4_target) and int(os.path.getsize(mp4_target) or 0) > 0:
+                final_video_path = mp4_target
+                final_mime = "video/mp4"
+                final_playable = True
+                try:
+                    os.remove(str(result_video_path))
+                except Exception:
+                    pass
+            else:
+                final_mime = "video/x-msvideo"
+                final_playable = False
+                if not video_output_warning:
+                    video_output_warning = (
+                        "El video se generó en AVI y puede no reproducirse en el navegador. Use Descargar."
+                    )
+                print("[VIDEO_OUTPUT][WARN] generated AVI not browser-playable")
+        else:
+            final_mime = "application/octet-stream"
+            final_playable = False
+
+    print(f"[VIDEO_OUTPUT] playable={bool(final_playable)} mime={final_mime}")
 
     avg_conf = (total_conf / max(1, frame_count)) if frame_count else 0.0
     top_items = sorted(top_heap, key=lambda x: x[0], reverse=True)
@@ -3868,11 +3979,21 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
         {
             "success": True,
             "result_type": "video",
+            # Compat legacy:
             "result_url": (
-                ("/" + os.path.relpath(wrote_to, app.root_path).replace("\\", "/"))
-                if out is not None and wrote_to
+                ("/" + os.path.relpath(final_video_path, app.root_path).replace("\\", "/"))
+                if final_video_path
                 else None
             ),
+            # Nuevo contrato (UI puede decidir si renderiza <video> o solo descarga)
+            "result_video_url": (
+                ("/" + os.path.relpath(final_video_path, app.root_path).replace("\\", "/"))
+                if final_video_path
+                else None
+            ),
+            "result_video_path": (os.path.relpath(final_video_path, app.root_path).replace("\\", "/") if final_video_path else None),
+            "result_video_mime": final_mime,
+            "result_video_playable": bool(final_playable),
             "video_output_warning": video_output_warning,
             "top_detections": top_detections,
             "frames_processed": frame_count,

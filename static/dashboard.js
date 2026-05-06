@@ -447,10 +447,8 @@
           const url = String(data.result_url || "");
           const typ = String(data.result_type || "");
           const btn = byId("btnDownload");
-          if (btn && url) {
-            btn.href = url;
-            btn.classList.remove("d-none");
-          }
+          const warning = data.video_output_warning ? String(data.video_output_warning) : "";
+          if (warning) showFlash("warning", warning);
 
           if (typ === "image") {
             const img = byId("resultImage");
@@ -459,6 +457,7 @@
               img.classList.remove("d-none");
             }
             byId("resultVideo")?.classList.add("d-none");
+            if (btn) btn.classList.add("d-none");
             setText("mDet", String(data.detections_count ?? 0));
             setText("mConf", fmtPct(data.avg_confidence ?? 0));
             setText("mFrames", "-");
@@ -466,10 +465,27 @@
           } else if (typ === "video") {
             const vid = byId("resultVideo");
             const src = byId("resultVideoSource");
-            if (vid && src && url) {
-              src.src = url;
+            const playable = Boolean(data.result_video_playable ?? true);
+            const vurl = String(data.result_video_url || url || "");
+            const mime = String(data.result_video_mime || "video/mp4");
+            const cacheBustUrl = vurl ? `${vurl}${vurl.includes("?") ? "&" : "?"}v=${encodeURIComponent(jobId)}` : "";
+
+            if (btn && vurl) {
+              btn.href = vurl;
+              btn.classList.remove("d-none");
+            } else if (btn) {
+              btn.classList.add("d-none");
+            }
+
+            if (playable && vid && src && cacheBustUrl) {
+              src.type = mime || "video/mp4";
+              src.src = cacheBustUrl;
               vid.load();
               vid.classList.remove("d-none");
+            } else {
+              // No mostrar reproductor vacío si no es reproducible
+              vid?.classList.add("d-none");
+              if (vurl) showFlash("warning", "El video procesado no es reproducible en el navegador. Use Descargar.");
             }
             byId("resultImage")?.classList.add("d-none");
             setText("mDet", String(data.total_detections ?? 0));
