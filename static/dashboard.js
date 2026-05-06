@@ -167,7 +167,7 @@
         ptzMoving = false;
         if (stopSent) return;
         stopSent = true;
-        postJson("/api/ptz_stop", {});
+        postJson("/api/ptz_stop", { source: "manual", disable_tracking: false });
         if (activeStop === stop) activeStop = null;
       };
 
@@ -180,7 +180,22 @@
     bindHoldMove("ptzDown", { x: 0.0, y: -1.0, zoom: 0.0 });
     bindHoldMove("ptzLeft", { x: -1.0, y: 0.0, zoom: 0.0 });
     bindHoldMove("ptzRight", { x: 1.0, y: 0.0, zoom: 0.0 });
-    bind("ptzStop", () => postJson("/api/ptz_stop", {}));
+    const setAutoTrackingButtonState = (enabled) => {
+      const t = byId("autoTrackingToggle");
+      if (t) t.checked = Boolean(enabled);
+    };
+
+    let ptzStopRequestInFlight = false;
+    bind("ptzStop", async () => {
+      if (ptzStopRequestInFlight) return;
+      ptzStopRequestInFlight = true;
+      try {
+        const res = await postJson("/api/ptz_stop", { source: "manual", disable_tracking: true });
+        if (res && res.ok) setAutoTrackingButtonState(false);
+      } finally {
+        ptzStopRequestInFlight = false;
+      }
+    });
 
     const autoToggle = byId("autoTrackingToggle");
     if (autoToggle) {

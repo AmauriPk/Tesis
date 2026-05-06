@@ -64,7 +64,7 @@ except Exception:  # pragma: no cover
 
 from config import FLASK_CONFIG, ONVIF_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG, _env_float, _env_int
 from src.system_core import CameraConfig, FrameRecord, MetricsDBWriter, PTZController, User, db
-from src.video_processor import LiveStreamDeps, LiveVideoProcessor, RTSPLatestFrameReader
+from src.video_processor import LiveStreamDeps, LiveVideoProcessor, RTSPLatestFrameReader, draw_detections
 from src.system_core import clamp, select_priority_detection
 
 # ======================== APP / DB ========================
@@ -2559,11 +2559,29 @@ def ptz_stop():
             jsonify({"ok": False, "error": "PTZ manual bloqueado: la cámara no está configurada como PTZ"}),
             403,
         )
+    payload = request.get_json(silent=True) or {}
+    source = str(payload.get("source") or "manual").strip().lower() or "manual"
+    disable_tracking = bool(payload.get("disable_tracking", True if source == "manual" else False))
+
     global auto_tracking_enabled, inspection_mode_enabled
-    with state_lock:
-        auto_tracking_enabled = False
-        inspection_mode_enabled = False
+    if source == "manual" and bool(disable_tracking):
+        with state_lock:
+            auto_tracking_enabled = False
+        # Invalida el objetivo de tracking para que el worker no reanude inmediatamente.
+        with tracking_target_lock:
+            tracking_target_state["has_target"] = False
+            tracking_target_state["bbox"] = None
+            tracking_target_state["updated_at"] = 0.0
+    print(f"[PTZ_STOP] source={source} disable_tracking={bool(disable_tracking)} auto_tracking={bool(auto_tracking_enabled)}")
     ptz_worker.enqueue_stop()
+    if source == "manual" and bool(disable_tracking):
+        return jsonify(
+            {
+                "ok": True,
+                "auto_tracking_enabled": False,
+                "message": "PTZ detenido y seguimiento automático desactivado",
+            }
+        )
     return jsonify({"ok": True})
 
 
