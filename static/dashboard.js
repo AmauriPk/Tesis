@@ -472,6 +472,7 @@
             const vurl = String(data.result_video_url || url || "");
             const rawUrl = String(data.result_video_raw_url || "");
             const mime = String(data.result_video_mime || "video/mp4");
+            const openTab = byId("openResultVideoTab");
             const cacheBustUrl = vurl
               ? `${vurl}${vurl.includes("?") ? "&" : "?"}v=${encodeURIComponent(`${jobId}-${Date.now()}`)}`
               : "";
@@ -488,37 +489,46 @@
             // Descargar siempre debe apuntar al raw si está disponible (útil aunque el browser mp4 exista).
             setDownload(btn, rawUrl || vurl);
             setDownload(dlVideo, rawUrl || vurl);
+            setDownload(openTab, vurl || rawUrl);
 
             if (!cacheBustUrl) {
               vid?.classList.add("d-none");
               showFlash("warning", "El análisis terminó, pero no se recibió URL del video procesado.");
-            } else if (playable && vid && src) {
-              // Evitar estados raros: resetear, asignar y recargar.
+            } else if (playable && vid) {
+              // Limpieza fuerte antes de asignar un nuevo video.
               try {
                 vid.pause();
-                vid.currentTime = 0;
+                vid.removeAttribute("src");
+                if (src) src.removeAttribute("src");
+                vid.load();
               } catch {}
 
-              src.type = mime || "video/mp4";
-              src.src = cacheBustUrl;
-              // Algunos navegadores prefieren `video.src` además del `<source>`.
-              try {
-                vid.src = cacheBustUrl;
-              } catch {}
+              if (src) {
+                // Evitar conflictos: usamos `video.src` como fuente de verdad.
+                src.removeAttribute("src");
+              }
 
-              const onErr = () => {
+              // Asignar solo una vez.
+              vid.src = cacheBustUrl;
+
+              // Debug útil (no fatal).
+              vid.onloadstart = () => console.log("[VIDEO_PLAYER] loadstart", cacheBustUrl);
+              vid.onloadedmetadata = () => console.log("[VIDEO_PLAYER] loadedmetadata", vid.duration);
+              vid.oncanplay = () => console.log("[VIDEO_PLAYER] canplay");
+              vid.onplaying = () => console.log("[VIDEO_PLAYER] playing");
+              vid.onstalled = () => console.warn("[VIDEO_PLAYER] stalled; waiting for browser buffer", cacheBustUrl);
+              vid.onerror = () => {
+                console.error("[VIDEO_PLAYER] error", vid.error, cacheBustUrl);
                 vid.classList.add("d-none");
                 showFlash("warning", "No se pudo cargar el video procesado en el reproductor. Use Descargar.");
               };
-              vid.onerror = onErr;
-              vid.onstalled = onErr;
 
+              // tipo mime sugerido
+              try {
+                vid.type = mime || "video/mp4";
+              } catch {}
               vid.load();
               vid.classList.remove("d-none");
-              // No forzar play (el usuario puede iniciarlo), pero ayuda a validar que carga.
-              try {
-                vid.play().catch(() => null);
-              } catch {}
             } else {
               vid?.classList.add("d-none");
               showFlash("warning", "El video procesado no es reproducible en el navegador. Use Descargar.");
