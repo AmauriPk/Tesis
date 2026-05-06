@@ -215,6 +215,12 @@ class RTSPLatestFrameReader:
         self._lock = threading.Lock()
         self._frame: Optional[np.ndarray] = None
         self._ts: Optional[float] = None
+        self._last_frame_at: Optional[float] = None
+        self._reconnect_count = 0
+        self._last_error: Optional[str] = None
+        self._is_connected = False
+        self._last_reconnect_log_at = 0.0
+        self._last_timeout_log_at = 0.0
 
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -232,6 +238,20 @@ class RTSPLatestFrameReader:
         with self._lock:
             return self._frame, self._ts
 
+    def get_status(self) -> dict[str, Any]:
+        with self._lock:
+            now = time.time()
+            last_frame_at = self._last_frame_at
+            age_s = None if last_frame_at is None else float(now - float(last_frame_at))
+            return {
+                "is_connected": bool(self._is_connected),
+                "current_url": str(self._current_url or ""),
+                "last_frame_at": last_frame_at,
+                "last_frame_age_s": age_s,
+                "reconnect_count": int(self._reconnect_count),
+                "last_error": (str(self._last_error) if self._last_error else None),
+            }
+
     def _run(self) -> None:
         cap: cv2.VideoCapture | None = None
         try:
@@ -245,12 +265,22 @@ class RTSPLatestFrameReader:
                         except Exception:
                             pass
                         cap = None
+                        with self._lock:
+                            self._is_connected = False
 
                 if not self._current_url:
                     time.sleep(0.5)
                     continue
 
                 if cap is None or not cap.isOpened():
+                    with self._lock:
+                        self._reconnect_count += 1
+                        self._last_error = None
+                        self._is_connected = False
+                    now = time.time()
+                    if (now - float(self._last_reconnect_log_at)) >= 2.0:
+                        print("[RTSP] reconnecting...")
+                        self._last_reconnect_log_at = now
                     src: Any = self._current_url
                     if isinstance(src, str) and src.strip().isdigit():
                         try:
@@ -273,11 +303,20 @@ class RTSPLatestFrameReader:
                         cap.set(cv2.CAP_PROP_FPS, int(self._video_config.get("fps", 30)))
                         cap.set(cv2.CAP_PROP_BUFFERSIZE, int(self._rtsp_config.get("buffer_size", 1)))
                     else:
+                        with self._lock:
+                            self._last_error = "open failed"
                         time.sleep(1.0)
                         continue
 
                 ret, frame = cap.read()
                 if not ret or frame is None:
+                    with self._lock:
+                        self._last_error = "no frame/timeout"
+                        self._is_connected = False
+                    now = time.time()
+                    if (now - float(self._last_timeout_log_at)) >= 2.5:
+                        print("[RTSP] timeout/no frame")
+                        self._last_timeout_log_at = now
                     try:
                         cap.release()
                     except Exception:
@@ -287,15 +326,24 @@ class RTSPLatestFrameReader:
                     continue
 
                 ts = time.time()
+                was_connected = False
                 with self._lock:
                     self._frame = frame
                     self._ts = ts
+                    self._last_frame_at = ts
+                    was_connected = bool(self._is_connected)
+                    self._is_connected = True
+                    self._last_error = None
+                if not was_connected:
+                    print("[RTSP] connected")
         finally:
             if cap is not None:
                 try:
                     cap.release()
                 except Exception:
                     pass
+            with self._lock:
+                self._is_connected = False
 
 
 class DetectionPersistence:

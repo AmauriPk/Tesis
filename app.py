@@ -1997,7 +1997,27 @@ def camera_status():
     # Fail-safe: jamás responder 500 aquí. Ante cualquier problema de ONVIF (timeout, credenciales,
     # cámara sin PTZ, falta de dependencia), se asume cámara fija.
     ct = get_configured_camera_type()
-    return jsonify({"status": "ok", "camera_type": ct, "configured_is_ptz": (ct == "ptz")}), 200
+    rtsp_status = {}
+    try:
+        rtsp_status = dict(live_reader.get_status() or {})
+    except Exception:
+        rtsp_status = {"error": "rtsp_status_unavailable"}
+    try:
+        age = rtsp_status.get("last_frame_age_s")
+        rtsp_status["stale_over_5s"] = (age is None) or (float(age) > 5.0)
+    except Exception:
+        rtsp_status["stale_over_5s"] = True
+    return (
+        jsonify(
+            {
+                "status": "ok",
+                "camera_type": ct,
+                "configured_is_ptz": (ct == "ptz"),
+                "rtsp": rtsp_status,
+            }
+        ),
+        200,
+    )
 
 @app.get("/api/get_camera_status")
 @login_required
