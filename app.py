@@ -13,6 +13,7 @@ Reglas INTRANSFERIBLES (NO eliminar; solo optimizar/refactorizar):
 6) Mitigación de aves: persistencia de frames antes de confirmar una detección.
 """
 import base64
+import heapq
 import json
 import os
 import queue
@@ -2802,6 +2803,29 @@ def _open_writer_h264(path: str, fps: float, width: int, height: int):
             pass
     return None, None
 
+
+def create_video_writer(output_path: str, fps: float, width: int, height: int):
+    codecs = [
+        ("mp4v", output_path),
+        ("XVID", output_path.replace(".mp4", ".avi")),
+    ]
+    for codec, path in codecs:
+        try:
+            fourcc = cv2.VideoWriter_fourcc(*codec)
+            out = cv2.VideoWriter(path, fourcc, float(fps), (int(width), int(height)))
+            opened = bool(out is not None and out.isOpened())
+            print("[VIDEO_WRITER]", f"codec={codec} opened={bool(opened)} path={path}")
+            if opened:
+                return out, path, codec
+            try:
+                out.release()
+            except Exception:
+                pass
+        except Exception:
+            pass
+    print("[VIDEO_WRITER][ERROR] no se pudo inicializar ningún codec")
+    return None, None, None
+
 def _ffmpeg_transcode_h264(src_path: str, dst_path: str):
     """Transcodifica a H.264 con ffmpeg (python-ffmpeg o binario), si está disponible."""
     # Preferir ffmpeg-python si está disponible (requiere binario ffmpeg en PATH).
@@ -2881,13 +2905,12 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
 
     out, used = _open_writer_h264(out_path, fps, width, height)
     wrote_to = out_path
+    video_output_warning = None
     if out is None:
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        out = cv2.VideoWriter(tmp_path, fourcc, float(fps), (width, height))
-        wrote_to = tmp_path
-        used = "mp4v"
-    if not out.isOpened():
-        raise RuntimeError("No se pudo crear el writer de video (codec).")
+        print("[VIDEO_WRITER][WARN] H264 no disponible, usando fallback")
+        out, wrote_to, used = create_video_writer(tmp_path, fps, width, height)
+    if out is None:
+        video_output_warning = "No se pudo inicializar VideoWriter; se omitió el video de salida."
 
     frame_count = 0
     total_detections = 0
@@ -2941,7 +2964,8 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
                     elif best_conf > top_heap[0][0]:
                         heapq.heapreplace(top_heap, item)
 
-            out.write(frame)
+            if out is not None:
+                out.write(frame)
             frame_count += 1
 
             if iterator is not None:
@@ -2959,10 +2983,14 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
         except Exception:
             pass
         cap.release()
-        out.release()
+        try:
+            if out is not None:
+                out.release()
+        except Exception:
+            pass
 
     # Si no se pudo escribir H.264 directo, transcodificar a libx264 si existe ffmpeg.
-    if used not in {"avc1", "H264"} and wrote_to != out_path:
+    if out is not None and used not in {"avc1", "H264"} and wrote_to != out_path:
         try:
             ok = _ffmpeg_transcode_h264(wrote_to, out_path)
             if not ok:
@@ -2994,7 +3022,8 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
         {
             "success": True,
             "result_type": "video",
-            "result_url": f"/static/results/{out_name}",
+            "result_url": (f"/static/results/{out_name}" if out is not None else None),
+            "video_output_warning": video_output_warning,
             "top_detections": top_detections,
             "frames_processed": frame_count,
             "total_detections": total_detections,
