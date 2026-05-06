@@ -3723,7 +3723,7 @@ def create_video_writer(output_path: str, fps: float, width: int, height: int):
     return None, None, None
 
 
-def transcode_to_browser_mp4(input_path: str, output_path: str) -> bool:
+def transcode_to_browser_mp4(input_path: str, output_path: str) -> tuple[bool, str | None]:
     """
     Intenta transcodificar `input_path` a un MP4 reproducible en navegador.
 
@@ -3734,6 +3734,10 @@ def transcode_to_browser_mp4(input_path: str, output_path: str) -> bool:
     out_path = str(output_path)
 
     print(f"[VIDEO_TRANSCODE] input={in_path} output={out_path}")
+
+    ffmpeg_bin = (os.environ.get("FFMPEG_BIN") or "").strip() or None
+    if ffmpeg_bin is None:
+        ffmpeg_bin = shutil.which("ffmpeg")
 
     # ffmpeg-python (requiere binario ffmpeg en PATH).
     if ffmpeg is not None:
@@ -3747,15 +3751,15 @@ def transcode_to_browser_mp4(input_path: str, output_path: str) -> bool:
                 )
                 ok = bool(os.path.exists(out_path) and int(os.path.getsize(out_path) or 0) > 0)
                 print(f"[VIDEO_TRANSCODE] success={bool(ok)} codec={vcodec}")
-                return bool(ok)
+                return bool(ok), (None if ok else "transcode_failed")
             except Exception as e:
                 print(f"[VIDEO_TRANSCODE][WARN] codec={vcodec} failed err={str(e) or e.__class__.__name__}")
                 continue
 
-    ffmpeg_bin = shutil.which("ffmpeg")
     if not ffmpeg_bin:
+        print("[VIDEO_TRANSCODE][ERROR] ffmpeg no encontrado. Instale FFmpeg o configure FFMPEG_BIN.")
         print("[VIDEO_TRANSCODE] success=False reason=ffmpeg_missing")
-        return False
+        return False, "ffmpeg_missing"
 
     for vcodec in ("libx264", "mpeg4"):
         try:
@@ -3776,24 +3780,24 @@ def transcode_to_browser_mp4(input_path: str, output_path: str) -> bool:
             subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             ok = bool(os.path.exists(out_path) and int(os.path.getsize(out_path) or 0) > 0)
             print(f"[VIDEO_TRANSCODE] success={bool(ok)} codec={vcodec}")
-            return bool(ok)
+            return bool(ok), (None if ok else "transcode_failed")
         except Exception as e:
             print(f"[VIDEO_TRANSCODE][WARN] codec={vcodec} failed err={str(e) or e.__class__.__name__}")
             continue
 
     print("[VIDEO_TRANSCODE] success=False")
-    return False
+    return False, "transcode_failed"
 
 
-def make_browser_compatible_mp4(input_path: str, output_path: str) -> bool:
+def make_browser_compatible_mp4(input_path: str, output_path: str) -> tuple[bool, str | None]:
     """
     Wrapper semántico: genera un MP4 final compatible con navegador.
     """
     try:
-        return bool(transcode_to_browser_mp4(input_path, output_path))
+        return transcode_to_browser_mp4(input_path, output_path)
     except Exception as e:
         print(f"[VIDEO_TRANSCODE][ERROR] {str(e) or e.__class__.__name__}")
-        return False
+        return False, "exception"
 
 def _persist_top_detections_images(clean_dir: str, bb_dir: str, top_items: list[tuple[float, int, bytes, bytes]]) -> list[dict]:
     """Guarda Top 10 en limpio + con bounding box y devuelve al frontend SOLO las imÃ¡genes con bounding box.
@@ -3943,11 +3947,12 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
     final_playable = False
     if result_video_path:
         ok = False
+        reason = None
         try:
-            ok = make_browser_compatible_mp4(result_video_path, browser_path)
+            ok, reason = make_browser_compatible_mp4(result_video_path, browser_path)
         except Exception:
-            ok = False
-        if ok:
+            ok, reason = False, "exception"
+        if ok and os.path.exists(browser_path) and int(os.path.getsize(browser_path) or 0) > 0 and str(browser_path).endswith("_browser.mp4"):
             final_video_path = browser_path
             final_mime = "video/mp4"
             final_playable = True
@@ -3963,9 +3968,15 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
             final_mime = "video/mp4" if ext == ".mp4" else ("video/x-msvideo" if ext == ".avi" else "application/octet-stream")
             final_playable = False
             if not video_output_warning:
-                video_output_warning = (
-                    "El video fue generado, pero no se pudo convertir a un formato reproducible en navegador. Use Descargar."
-                )
+                if reason == "ffmpeg_missing":
+                    video_output_warning = (
+                        "FFmpeg no está instalado o no está en PATH. El video se generó, pero solo puede descargarse. "
+                        "Instale FFmpeg o configure FFMPEG_BIN para verlo en el navegador."
+                    )
+                else:
+                    video_output_warning = (
+                        "El video fue generado, pero no se pudo convertir a un formato reproducible en navegador. Use Descargar."
+                    )
             print("[VIDEO_OUTPUT][WARN] browser playable mp4 unavailable; download only")
 
     print(f"[VIDEO_OUTPUT] playable={bool(final_playable)} mime={final_mime}")

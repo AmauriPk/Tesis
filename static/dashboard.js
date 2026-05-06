@@ -531,7 +531,14 @@
               vid.classList.remove("d-none");
             } else {
               vid?.classList.add("d-none");
-              showFlash("warning", "El video procesado no es reproducible en el navegador. Use Descargar.");
+              if (warning && /ffmpeg/i.test(warning)) {
+                showFlash(
+                  "warning",
+                  "El video fue procesado, pero no se puede visualizar en el navegador porque falta FFmpeg. Use Descargar o instale FFmpeg."
+                );
+              } else {
+                showFlash("warning", "El video procesado no es reproducible en el navegador. Use Descargar.");
+              }
             }
             byId("resultImage")?.classList.add("d-none");
             setText("mDet", String(data.total_detections ?? 0));
