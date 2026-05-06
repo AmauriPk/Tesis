@@ -624,7 +624,13 @@ class _InspectionPatrolWorker:
                     continue
 
                 now = time.time()
-                x_speed = float(0.25) * float(self._dir)
+                speed = float(_env_float("PTZ_INSPECTION_SPEED", 0.45))
+                duration = float(_env_float("PTZ_INSPECTION_DURATION", 4.0))
+                pause = float(_env_float("PTZ_INSPECTION_PAUSE", 0.7))
+                speed = _clamp(abs(float(speed)), 0.05, 0.80)
+                duration = _clamp(float(duration), 0.5, 8.0)
+                pause = _clamp(float(pause), 0.2, 3.0)
+                x_speed = float(speed) * float(self._dir)
 
                 if paused_by_detection:
                     if self._patrolling and not self._stop_sent_in_pause:
@@ -643,19 +649,19 @@ class _InspectionPatrolWorker:
 
                 phase = str(self._phase)
                 if phase == "move":
-                    ptz_worker.enqueue_move(x=float(x_speed), y=0.0, zoom=0.0, duration_s=2.0, source="inspection")
+                    ptz_worker.enqueue_move(x=float(x_speed), y=0.0, zoom=0.0, duration_s=float(duration), source="inspection")
                     self._patrolling = True
                     self._phase = "wait_stop"
-                    self._next_action_at = now + 2.0
+                    self._next_action_at = now + float(duration)
                     print(
                         "[INSPECTION_CMD]",
-                        f"phase=move direction={'right' if self._dir > 0 else 'left'} x={float(x_speed):.2f} duration=2.0",
+                        f"phase=move direction={'right' if self._dir > 0 else 'left'} x={float(x_speed):.2f} duration={float(duration):.1f}",
                     )
                 elif phase == "wait_stop":
                     ptz_worker.enqueue_stop()
                     self._patrolling = False
                     self._phase = "wait_pause"
-                    self._next_action_at = now + 0.5
+                    self._next_action_at = now + float(pause)
                     print("[INSPECTION_CMD]", "phase=stop")
                 else:  # wait_pause
                     self._dir = -1.0 * float(self._dir)
@@ -1863,6 +1869,7 @@ def _iter_classified_images(limit: int = 300) -> list[dict]:
                 except Exception:
                     mtime = 0.0
                 rel = os.path.relpath(full, os.path.abspath(DATASET_TRAINING_ROOT)).replace("\\", "/")
+                category_label = "Dron" if str(scope) == "positive" else "No dron"
                 items.append(
                     (
                         mtime,
@@ -1870,7 +1877,11 @@ def _iter_classified_images(limit: int = 300) -> list[dict]:
                             "scope": scope,
                             "label": label,
                             "name": name,
+                            "filename": name,
                             "id": f"{scope}:{name}",
+                            "path": rel,
+                            "category": scope,
+                            "category_label": category_label,
                             "mtime": datetime.fromtimestamp(float(mtime)).isoformat() if mtime else None,
                             "url": url_for("api_get_classified_image", path=rel),
                         },

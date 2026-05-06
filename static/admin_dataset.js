@@ -122,12 +122,18 @@
       for (const it of items) {
         const relId = it.id || it.path || it;
         const src = it.url ? String(it.url) : `/api/classified_image?path=${encodeURIComponent(relId)}`;
+        const category = String(it.category || (String(relId).includes(":") ? String(relId).split(":", 1)[0] : "")).toLowerCase();
+        const categoryLabel = String(it.category_label || (category === "positive" ? "Dron" : "No dron"));
+        const badgeClass = category === "positive" ? "bg-success" : "bg-secondary";
         const col = document.createElement("div");
         col.className = "col-6 col-md-4 col-lg-3";
         col.innerHTML = `
           <div class="card h-100">
             <img class="img-fluid rounded" style="border:1px solid rgba(48,54,61,.6)" src="${src}" alt="Imagen" />
             <div class="card-body py-2">
+              <div class="mb-2">
+                <span class="badge ${badgeClass}">Categoría: ${categoryLabel}</span>
+              </div>
               <button class="btn btn-sm btn-outline-warning w-100" data-action="revert">Revertir</button>
             </div>
           </div>
