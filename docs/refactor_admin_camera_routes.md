@@ -51,6 +51,8 @@ Por eso se ajustaron las referencias en templates (sin cambiar HTML/JS fuera de 
 Luego registra:
 - `app.register_blueprint(admin_camera_bp)`
 
+Nota: `probe_onvif_ptz_capability` se inyecta desde `app.py` (no se movió) y debe existir/definirse antes de llamar `init_admin_camera_routes(...)` para evitar errores de arranque.
+
 ## Helpers movidos
 
 Movidos a `src/routes/admin_camera.py` por ser exclusivos de pruebas admin:
@@ -93,4 +95,3 @@ No se movieron endpoints de PTZ manual:
 ## Pendiente
 
 - Refactor posterior (si se desea): mover lógica compartida de configuración a un servicio dedicado, sin tocar endpoints.
-

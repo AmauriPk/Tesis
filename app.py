@@ -945,18 +945,6 @@ init_events_routes(
 )
 app.register_blueprint(events_bp)
 
-init_admin_camera_routes(
-    role_required=role_required,
-    db=db,
-    get_or_create_camera_config=get_or_create_camera_config,
-    guardar_config_camara=guardar_config_camara,
-    normalized_onvif_port=_normalized_onvif_port,
-    PTZController=PTZController,
-    probe_onvif_ptz_capability=_probe_onvif_ptz_capability,
-    get_model_params=get_model_params,
-)
-app.register_blueprint(admin_camera_bp)
-
 def _bbox_offset_norm(frame_w: int, frame_h: int, bbox_xyxy) -> tuple[float, float]:
     """
     Calcula el error normalizado del centro del bbox respecto al centro del frame.
@@ -1559,6 +1547,18 @@ def _probe_onvif_ptz_capability() -> bool:
 
     _set_ptz_capable(False, error=last_error or "ONVIF/PTZ no disponible.")
     return False
+
+init_admin_camera_routes(
+    role_required=role_required,
+    db=db,
+    get_or_create_camera_config=get_or_create_camera_config,
+    guardar_config_camara=guardar_config_camara,
+    normalized_onvif_port=_normalized_onvif_port,
+    PTZController=PTZController,
+    probe_onvif_ptz_capability=_probe_onvif_ptz_capability,
+    get_model_params=get_model_params,
+)
+app.register_blueprint(admin_camera_bp)
 
 def _ptz_vector(direction: str):
     """Convierte una dirección simple (joystick) a vector (pan, tilt, zoom)."""
