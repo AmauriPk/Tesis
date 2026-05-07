@@ -25,7 +25,8 @@ El Blueprint se registra **sin prefijo**, por lo que se conservan:
   - `dataset_bp = Blueprint("dataset", __name__)`
   - `init_dataset_routes(**deps)` para inyección de dependencias y evitar imports circulares con `app.py`.
 
-Nota: para no romper `url_for("api_get_dataset_image")` y `url_for("api_get_classified_image")`, el Blueprint define `endpoint="..."` en cada ruta para conservar los nombres de endpoint globales que ya existían en `app.py`.
+Nota: al mover endpoints a un Blueprint, los nombres internos para `url_for(...)` cambian a `dataset.<endpoint>`, aunque las **URLs HTTP** se conservaron iguales. Por ejemplo:
+- `url_for("api_get_dataset_images")` -> `url_for("dataset.api_get_dataset_images")`
 
 ## Dependencias inyectadas (desde app.py)
 
@@ -97,4 +98,3 @@ Pendientes (se mantuvieron en `app.py` por uso compartido):
 
 - Si `init_dataset_routes(...)` no se llama antes de registrar el Blueprint, las rutas no quedan registradas.
 - Los nombres de endpoint se conservaron explícitamente en el Blueprint para no romper `url_for(...)`; cambiar esos `endpoint="..."` rompería el panel admin.
-

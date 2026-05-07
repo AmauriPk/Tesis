@@ -330,10 +330,10 @@
             }
         };
         window.__DATASET_CFG__ = {
-            list_url: "{{ url_for('api_get_dataset_images') }}",
-            classify_url: "{{ url_for('api_classify_image') }}",
-            history_url: "{{ url_for('api_get_classified_images') }}",
-            revert_url: "{{ url_for('api_revert_classification') }}",
+            list_url: "{{ url_for('dataset.api_get_dataset_images') }}",
+            classify_url: "{{ url_for('dataset.api_classify_image') }}",
+            history_url: "{{ url_for('dataset.api_get_classified_images') }}",
+            revert_url: "{{ url_for('dataset.api_revert_classification') }}",
         };
     </script>
     <script src="/static/admin_camera.js" defer></script>

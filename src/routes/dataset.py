@@ -79,7 +79,7 @@ def init_dataset_routes(**deps: Any) -> None:
                     "id": rel,
                     "name": os.path.basename(rel),
                     "mtime": datetime.fromtimestamp(float(mtime)).isoformat() if mtime else None,
-                    "url": url_for("api_get_dataset_image", path=rel),
+                    "url": url_for("dataset.api_get_dataset_image", path=rel),
                 }
             )
         return out
@@ -156,7 +156,7 @@ def init_dataset_routes(**deps: Any) -> None:
                                 "category": scope,
                                 "category_label": category_label,
                                 "mtime": datetime.fromtimestamp(float(mtime)).isoformat() if mtime else None,
-                                "url": url_for("api_get_classified_image", path=rel),
+                                "url": url_for("dataset.api_get_classified_image", path=rel),
                             },
                         )
                     )
@@ -370,4 +370,3 @@ def init_dataset_routes(**deps: Any) -> None:
             return jsonify({"status": "error", "message": f"No se pudo revertir: {str(e)}"}), 500
 
         return jsonify({"status": "success", "moved_to": dest}), 200
-
