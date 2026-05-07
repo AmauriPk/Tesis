@@ -52,7 +52,7 @@
             {% endif %}
         {% endwith %}
 
-        <form class="row g-3" method="post" action="{{ url_for('admin_camera') }}" autocomplete="off" id="cameraForm">
+        <form class="row g-3" method="post" action="{{ url_for('admin_camera.admin_camera') }}" autocomplete="off" id="cameraForm">
             <input type="hidden" name="camera_type" id="camera_type" value="{{ cfg.camera_type or 'fixed' }}" />
 
             <div class="col-lg-6">
@@ -182,7 +182,7 @@
     <script>
         window.__CAMERA_CFG__ = {
             initial_camera_type: "{{ cfg.camera_type or 'fixed' }}",
-            api_test_url: "{{ url_for('api_test_connection') }}",
+            api_test_url: "{{ url_for('admin_camera.api_test_connection') }}",
         };
     </script>
     <script src="/static/admin_camera.js" defer></script>
