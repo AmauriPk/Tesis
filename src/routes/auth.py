@@ -32,7 +32,7 @@ def init_auth_routes(**deps: Any) -> None:
     def login():
         """Login simple (Flask-Login)."""
         if current_user.is_authenticated:
-            return redirect(url_for("index"))
+            return redirect(url_for("dashboard.index"))
 
         if request.method == "POST":
             username = (request.form.get("username") or "").strip()
@@ -47,7 +47,7 @@ def init_auth_routes(**deps: Any) -> None:
                     is_safe = (parsed.scheme == "") and (parsed.netloc == "")
                     if is_safe and next_url not in {"/", "/?tab=live"}:
                         return redirect(next_url)
-                return redirect(url_for("index", tab="live"))
+                return redirect(url_for("dashboard.index", tab="live"))
             flash("Credenciales inválidas.", "danger")
 
         return render_template("login.html", show_bootstrap_hint=bool(FLASK_CONFIG.get("debug")))

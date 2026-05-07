@@ -77,6 +77,7 @@ from src.routes.events import events_bp, init_events_routes
 from src.routes.dataset import dataset_bp, init_dataset_routes
 from src.routes.admin_camera import admin_camera_bp, init_admin_camera_routes
 from src.routes.auth import auth_bp, init_auth_routes
+from src.routes.dashboard import dashboard_bp, init_dashboard_routes
 
 # ======================== APP / DB ========================
 app = Flask(__name__)
@@ -1840,6 +1841,18 @@ live_processor = LiveVideoProcessor(
     update_tracking_target=_update_tracking_target,
 )
 
+init_dashboard_routes(
+    role_required=role_required,
+    state_lock=state_lock,
+    current_detection_state=current_detection_state,
+    get_live_processor=lambda: live_processor,
+    get_live_reader=lambda: live_reader,
+    get_or_create_camera_config=get_or_create_camera_config,
+    leer_config_camara=leer_config_camara,
+    get_configured_camera_type=get_configured_camera_type,
+)
+app.register_blueprint(dashboard_bp)
+
 @app.get("/__diag")
 def diag():
     """Diagnóstico rápido (solo en debug y localhost)."""
@@ -1859,27 +1872,6 @@ def diag():
     )
 
 # ======================== UI ========================
-@app.route("/")
-@login_required
-def index():
-    """Dashboard principal (manual + live). Operador-only por regla de negocio."""
-    if current_user.role == "admin":
-        return redirect(url_for("admin_camera.admin_dashboard"))
-    cfg = get_or_create_camera_config()
-    # Fuente de verdad: config_camara.json (evita sobrescrituras por DB / memoria volátil).
-    is_ptz = bool(leer_config_camara())
-    camera_type_str = "ptz" if is_ptz else "fixed"
-    active_tab = (request.args.get("tab") or "").strip().lower() or "live"
-    if active_tab not in {"live", "manual"}:
-        active_tab = "live"
-    return render_template(
-        "index.html",
-        is_admin=(current_user.role == "admin"),
-        camera_type=camera_type_str,
-        current_user=current_user,
-        active_tab=active_tab,
-    )
-
 @app.post("/api/update_model_params")
 @login_required
 @role_required("admin")
@@ -2085,55 +2077,6 @@ def media(rel_path: str):
     return send_file(full)
 
 # ======================== STREAM + STATUS ========================
-@app.route("/video_feed")
-@login_required
-@role_required("operator")
-def video_feed():
-    """Entrega el stream MJPEG anotado."""
-    return Response(
-        live_processor.mjpeg_generator(),
-        mimetype="multipart/x-mixed-replace; boundary=frame",
-        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"},
-    )
-
-@app.route("/detection_status")
-@login_required
-@role_required("operator")
-def detection_status():
-    """Estado resumido (para badge/UI)."""
-    with state_lock:
-        return jsonify(dict(current_detection_state))
-
-@app.get("/api/camera_status")
-@login_required
-@role_required("operator")
-def camera_status():
-    """Expone si el hardware soporta PTZ (resultado de Auto-Discovery ONVIF)."""
-    # Fail-safe: jamás responder 500 aquí. Ante cualquier problema de ONVIF (timeout, credenciales,
-    # cámara sin PTZ, falta de dependencia), se asume cámara fija.
-    ct = get_configured_camera_type()
-    rtsp_status = {}
-    try:
-        rtsp_status = dict(live_reader.get_status() or {})
-    except Exception:
-        rtsp_status = {"error": "rtsp_status_unavailable"}
-    try:
-        age = rtsp_status.get("last_frame_age_s")
-        rtsp_status["stale_over_5s"] = (age is None) or (float(age) > 5.0)
-    except Exception:
-        rtsp_status["stale_over_5s"] = True
-    return (
-        jsonify(
-            {
-                "status": "ok",
-                "camera_type": ct,
-                "configured_is_ptz": (ct == "ptz"),
-                "rtsp": rtsp_status,
-            }
-        ),
-        200,
-    )
-
 @app.get("/api/get_camera_status")
 @login_required
 def api_get_camera_status():
