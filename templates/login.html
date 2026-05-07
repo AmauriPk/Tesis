@@ -24,7 +24,7 @@
                     {% endif %}
                 {% endwith %}
 
-                <form method="post" action="{{ url_for('login') }}" autocomplete="off">
+                <form method="post" action="{{ url_for('auth.login') }}" autocomplete="off">
                     <input type="hidden" name="next" value="{{ request.args.get('next', '') }}" />
                     <div class="mb-3">
                         <label class="form-label">Usuario</label>

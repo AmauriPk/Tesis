@@ -76,6 +76,7 @@ from src.routes.analysis import analysis_bp, init_analysis_routes
 from src.routes.events import events_bp, init_events_routes
 from src.routes.dataset import dataset_bp, init_dataset_routes
 from src.routes.admin_camera import admin_camera_bp, init_admin_camera_routes
+from src.routes.auth import auth_bp, init_auth_routes
 
 # ======================== APP / DB ========================
 app = Flask(__name__)
@@ -134,7 +135,7 @@ os.makedirs(DATASET_LIMPIAS_INBOX_DIR, exist_ok=True)
 db.init_app(app)
 
 login_manager = LoginManager()
-login_manager.login_view = "login"
+login_manager.login_view = "auth.login"
 login_manager.init_app(app)
 
 @app.before_request
@@ -944,6 +945,12 @@ init_events_routes(
     parse_iso_ts_to_epoch=_parse_iso_ts_to_epoch,
 )
 app.register_blueprint(events_bp)
+
+init_auth_routes(
+    User=User,
+    FLASK_CONFIG=FLASK_CONFIG,
+)
+app.register_blueprint(auth_bp)
 
 def _bbox_offset_norm(frame_w: int, frame_h: int, bbox_xyxy) -> tuple[float, float]:
     """
@@ -1832,38 +1839,6 @@ live_processor = LiveVideoProcessor(
     ui_persistence_frames=int(DETECTION_PERSISTENCE_FRAMES),
     update_tracking_target=_update_tracking_target,
 )
-
-# ======================== AUTH ========================
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    """Login simple (Flask-Login)."""
-    if current_user.is_authenticated:
-        return redirect(url_for("index"))
-
-    if request.method == "POST":
-        username = (request.form.get("username") or "").strip()
-        password = request.form.get("password") or ""
-        user = User.query.filter_by(username=username).first()
-        if user and user.check_password(password):
-            login_user(user)
-            session.permanent = False
-            next_url = (request.form.get("next") or request.args.get("next") or "").strip()
-            if next_url:
-                parsed = urlparse(next_url)
-                is_safe = (parsed.scheme == "") and (parsed.netloc == "")
-                if is_safe and next_url not in {"/", "/?tab=live"}:
-                    return redirect(next_url)
-            return redirect(url_for("index", tab="live"))
-        flash("Credenciales inválidas.", "danger")
-
-    return render_template("login.html", show_bootstrap_hint=bool(FLASK_CONFIG.get("debug")))
-
-@app.route("/logout")
-@login_required
-def logout():
-    """Cierra sesión."""
-    logout_user()
-    return redirect(url_for("login"))
 
 @app.get("/__diag")
 def diag():
