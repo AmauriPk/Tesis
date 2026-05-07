@@ -56,3 +56,30 @@ Indicacion para git.txt
 *.db
 *.db-shm
 *.db-wal
+
+# Modelos exportados
+*.onnx
+*.tflite
+
+# Archivos de video y resultados generados (no subir al repositorio)
+static/results/*.mp4
+static/results/*.avi
+static/results/*.mov
+static/results/*.jpg
+static/results/*.jpeg
+static/results/*.png
+
+# Archivos de evidencia generados en tiempo de ejecución
+static/evidence/*.jpg
+static/evidence/*.jpeg
+static/evidence/*.png
+
+# Capturas generadas
+static/capturas/*.jpg
+static/capturas/*.jpeg
+static/capturas/*.png
+
+# Top detecciones generadas
+static/top_detections/*.jpg
+static/top_detections/*.jpeg
+static/top_detections/*.png
