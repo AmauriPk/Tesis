@@ -682,7 +682,6 @@ yolo_model = load_yolo_model()
 # ======================== LIVE STATE ========================
 ptz_state_service = PTZStateService()
 state_lock = ptz_state_service.state_lock
-stream_lock = threading.Lock()
 
 camera_source_mode = "fixed"  # fixed | ptz (autodescubrimiento ONVIF)
 
