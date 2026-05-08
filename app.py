@@ -78,6 +78,7 @@ from src.routes.dataset import dataset_bp, init_dataset_routes
 from src.routes.admin_camera import admin_camera_bp, init_admin_camera_routes
 from src.routes.auth import auth_bp, init_auth_routes
 from src.routes.dashboard import dashboard_bp, init_dashboard_routes
+from src.routes.model_params import model_params_bp, init_model_params_routes
 
 # ======================== APP / DB ========================
 app = Flask(__name__)
@@ -952,6 +953,12 @@ init_auth_routes(
     FLASK_CONFIG=FLASK_CONFIG,
 )
 app.register_blueprint(auth_bp)
+
+init_model_params_routes(
+    role_required=role_required,
+    update_model_params=update_model_params,
+)
+app.register_blueprint(model_params_bp)
 
 def _bbox_offset_norm(frame_w: int, frame_h: int, bbox_xyxy) -> tuple[float, float]:
     """
@@ -1872,38 +1879,6 @@ def diag():
     )
 
 # ======================== UI ========================
-@app.post("/api/update_model_params")
-@login_required
-@role_required("admin")
-def api_update_model_params():
-    """
-    Actualiza parÃ¡metros operativos del modelo en caliente.
-    Body JSON esperado:
-      - confidence_threshold: float [0.10, 1.00]
-      - persistence_frames: int [1, 10]
-      - iou_threshold: float [0.10, 1.00]
-    """
-    payload = request.get_json(silent=True) or {}
-    if not payload:
-        payload = request.form.to_dict(flat=True)
-
-    try:
-        conf = float(payload.get("confidence_threshold"))
-        iou = float(payload.get("iou_threshold"))
-        persistence = int(payload.get("persistence_frames"))
-    except Exception:
-        return jsonify({"status": "error", "message": "ParÃ¡metros invÃ¡lidos (tipos)."}), 400
-
-    if not (0.10 <= conf <= 1.00):
-        return jsonify({"status": "error", "message": "CONFIDENCE_THRESHOLD fuera de rango (0.10 - 1.00)."}), 400
-    if not (0.10 <= iou <= 1.00):
-        return jsonify({"status": "error", "message": "IOU_THRESHOLD fuera de rango (0.10 - 1.00)."}), 400
-    if not (1 <= persistence <= 10):
-        return jsonify({"status": "error", "message": "PERSISTENCE_FRAMES fuera de rango (1 - 10)."}), 400
-
-    updated = update_model_params(confidence_threshold=conf, persistence_frames=persistence, iou_threshold=iou)
-    return jsonify({"status": "success", "model_params": updated}), 200
-
 def _safe_rel_path(rel_path: str) -> str:
     """
     Normaliza un path relativo y bloquea traversal basico.

@@ -322,7 +322,7 @@
     <script>
         window.__CAMERA_CFG__ = { api_test_url: "{{ url_for('admin_camera.api_test_connection') }}" };
         window.__MODEL_PARAMS_CFG__ = {
-            update_url: "{{ url_for('api_update_model_params') }}",
+            update_url: "{{ url_for('model_params.api_update_model_params') }}",
             initial: {
                 confidence_threshold: {{ '%.2f'|format(model_params.confidence_threshold) }},
                 persistence_frames: {{ model_params.persistence_frames }},
