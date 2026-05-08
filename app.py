@@ -79,6 +79,7 @@ from src.routes.admin_camera import admin_camera_bp, init_admin_camera_routes
 from src.routes.auth import auth_bp, init_auth_routes
 from src.routes.dashboard import dashboard_bp, init_dashboard_routes
 from src.routes.model_params import model_params_bp, init_model_params_routes
+from src.routes.ptz_manual import ptz_manual_bp, init_ptz_manual_routes
 
 # ======================== APP / DB ========================
 app = Flask(__name__)
@@ -896,6 +897,12 @@ _onvif_last_probe_at: float | None = None
 _onvif_last_probe_error: str | None = None
 _last_ptz_ready_automation: bool | None = None
 _last_ptz_ready_manual: bool | None = None
+
+
+def set_auto_tracking_enabled(value: bool) -> None:
+    global auto_tracking_enabled
+    with state_lock:
+        auto_tracking_enabled = bool(value)
 
 # Tracking PTZ (separado del hilo de video)
 tracking_target_lock = threading.Lock()
@@ -2175,100 +2182,24 @@ def is_ptz_ready_for_automation() -> bool:
     _log_ptz_ready(kind="automation", ready=ready, configured=configured_ptz, discovered=discovered)
     return bool(ready)
 
-@app.post("/ptz_move")
-@login_required
-@role_required("operator")
-def ptz_move():
-    """Movimiento PTZ (joystick) o vector libre; bloqueado si la cámara no es PTZ."""
-    configured_ptz = bool(is_camera_configured_ptz())
-    ptz_capable = bool(_ptz_discovered_capable())
-    ready = bool(is_ptz_ready_for_manual())
-    print(
-        "[PTZ_READY]",
-        f"manual={bool(ready)} configured={bool(configured_ptz)} discovered={bool(ptz_capable)}",
-    )
-    if not ready:
-        return (
-            jsonify({"ok": False, "error": "PTZ manual bloqueado: la cámara no está configurada como PTZ"}),
-            403,
-        )
-    with app.app_context():
-        cfg = get_or_create_camera_config()
-        host = (cfg.onvif_host or "").strip()
-        username = (cfg.onvif_username or "").strip()
-        password = (cfg.onvif_password or "").strip()
-        port = _normalized_onvif_port(cfg.onvif_port)
 
-    if not host:
-        return jsonify({"ok": False, "error": "ONVIF_HOST no configurado."}), 400
-    if not username or not password:
-        return jsonify({"ok": False, "error": "Credenciales ONVIF incompletas (ONVIF_USERNAME/ONVIF_PASSWORD)."}), 400
-    if int(cfg.onvif_port or 0) == 554:
-        print("[ONVIF][WARN] onvif_port=554 parece RTSP; usando 80 para ONVIF.")
-
-    payload = request.get_json(silent=True) or {}
-    direction = (payload.get("direction") or "").strip().lower()
-    if direction:
-        ptz_worker.enqueue_direction(direction)
-        return jsonify({"ok": True})
-
-    try:
-        x = float(payload.get("x") or 0.0)
-        y = float(payload.get("y") or 0.0)
-        zoom = float(payload.get("zoom") or 0.0)
-        duration_s = float(payload.get("duration_s") or 0.15)
-    except Exception:
-        return jsonify({"ok": False, "error": "Payload inválido."}), 400
-
-    x = _clamp(x, -1.0, 1.0)
-    y = _clamp(y, -1.0, 1.0)
-    zoom = _clamp(zoom, -1.0, 1.0)
-    duration_s = _clamp(duration_s, 0.05, 0.6)
-    ptz_worker.enqueue_move(x=x, y=y, zoom=zoom, duration_s=duration_s)
-    return jsonify({"ok": True})
-
-@app.post("/api/ptz_stop")
-@login_required
-@role_required("operator")
-def ptz_stop():
-    """Stop PTZ; bloqueado si la cámara no es PTZ."""
-    configured_ptz = bool(is_camera_configured_ptz())
-    ptz_capable = bool(_ptz_discovered_capable())
-    ready = bool(is_ptz_ready_for_manual())
-    print(
-        "[PTZ_READY]",
-        f"manual={bool(ready)} configured={bool(configured_ptz)} discovered={bool(ptz_capable)}",
-    )
-    if not ready:
-        return (
-            jsonify({"ok": False, "error": "PTZ manual bloqueado: la cámara no está configurada como PTZ"}),
-            403,
-        )
-    payload = request.get_json(silent=True) or {}
-    source = str(payload.get("source") or "manual").strip().lower() or "manual"
-    disable_tracking = bool(payload.get("disable_tracking", True if source == "manual" else False))
-
-    global auto_tracking_enabled, inspection_mode_enabled
-    if source == "manual" and bool(disable_tracking):
-        with state_lock:
-            auto_tracking_enabled = False
-        # Invalida el objetivo de tracking para que el worker no reanude inmediatamente.
-        with tracking_target_lock:
-            tracking_target_state["has_target"] = False
-            tracking_target_state["bbox"] = None
-            tracking_target_state["updated_at"] = 0.0
-    print(f"[PTZ_STOP] source={source} disable_tracking={bool(disable_tracking)} auto_tracking={bool(auto_tracking_enabled)}")
-    ptz_worker.enqueue_stop()
-    if source == "manual" and bool(disable_tracking):
-        return jsonify(
-            {
-                "ok": True,
-                "auto_tracking_enabled": False,
-                "message": "PTZ detenido y seguimiento automático desactivado",
-            }
-        )
-    return jsonify({"ok": True})
-
+init_ptz_manual_routes(
+    app=app,
+    role_required=role_required,
+    ptz_worker=ptz_worker,
+    state_lock=state_lock,
+    tracking_target_state=tracking_target_state,
+    tracking_target_lock=tracking_target_lock,
+    is_camera_configured_ptz=is_camera_configured_ptz,
+    ptz_discovered_capable=_ptz_discovered_capable,
+    is_ptz_ready_for_manual=is_ptz_ready_for_manual,
+    get_or_create_camera_config=get_or_create_camera_config,
+    normalized_onvif_port=_normalized_onvif_port,
+    clamp=_clamp,
+    get_auto_tracking_enabled=lambda: bool(auto_tracking_enabled),
+    set_auto_tracking_enabled=set_auto_tracking_enabled,
+)
+app.register_blueprint(ptz_manual_bp)
 
 @app.post("/api/inspection_test_move")
 @login_required
