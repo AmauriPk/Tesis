@@ -40,6 +40,7 @@ Para evitar importar `app.py`, el constructor recibe:
   - `tracking_worker = TrackingPTZWorker(...)`
   - `tracking_worker.start()`
 - Nota: se corrigió el orden de inicialización en `app.py` para crear `ptz_worker` antes de inicializar workers o registrar Blueprints que lo reciben por inyección de dependencias.
+- Nota: se corrigió el orden de inicialización en `app.py` para definir `is_ptz_ready_for_automation` antes de crear `TrackingPTZWorker` o registrar Blueprints que la reciben por inyección.
 
 ## Qué NO se movió (pendiente)
 

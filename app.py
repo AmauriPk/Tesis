@@ -1264,6 +1264,58 @@ init_admin_camera_routes(
 )
 app.register_blueprint(admin_camera_bp)
 
+# ======================== PTZ READYNESS HELPERS ========================
+def _require_ptz_capable() -> None:
+    """Bloquea rutas PTZ cuando el Auto-Discovery determina cámara fija."""
+    with state_lock:
+        ok = bool(is_ptz_capable)
+    if not ok:
+        abort(403)
+
+
+def _ptz_discovered_capable() -> bool:
+    with state_lock:
+        return bool(is_ptz_capable)
+
+
+def _should_log_ptz_ready() -> bool:
+    v = (os.environ.get("DEBUG_PTZ_READY") or "").strip().lower()
+    return v in {"1", "true", "t", "yes", "y", "on"}
+
+
+def _log_ptz_ready(*, kind: str, ready: bool, configured: bool, discovered: bool) -> None:
+    global _last_ptz_ready_automation, _last_ptz_ready_manual
+    if _should_log_ptz_ready():
+        print("[PTZ_READY]", f"{kind}={bool(ready)} configured={bool(configured)} discovered={bool(discovered)}")
+        return
+    if str(kind) == "automation":
+        if _last_ptz_ready_automation is None or bool(_last_ptz_ready_automation) != bool(ready):
+            _last_ptz_ready_automation = bool(ready)
+            print("[PTZ_READY]", f"automation={bool(ready)} configured={bool(configured)} discovered={bool(discovered)}")
+        return
+    if str(kind) == "manual":
+        if _last_ptz_ready_manual is None or bool(_last_ptz_ready_manual) != bool(ready):
+            _last_ptz_ready_manual = bool(ready)
+            print("[PTZ_READY]", f"manual={bool(ready)} configured={bool(configured)} discovered={bool(discovered)}")
+        return
+
+
+def is_ptz_ready_for_manual() -> bool:
+    configured_ptz = bool(is_camera_configured_ptz())
+    discovered = bool(_ptz_discovered_capable())
+    ready = bool(configured_ptz or discovered)
+    _log_ptz_ready(kind="manual", ready=ready, configured=configured_ptz, discovered=discovered)
+    return bool(ready)
+
+
+def is_ptz_ready_for_automation() -> bool:
+    configured_ptz = bool(is_camera_configured_ptz())
+    discovered = bool(_ptz_discovered_capable())
+    ready = bool(configured_ptz or discovered)
+    _log_ptz_ready(kind="automation", ready=ready, configured=configured_ptz, discovered=discovered)
+    return bool(ready)
+
+
 ptz_worker = PTZCommandWorker(
     app=app,
     get_or_create_camera_config=get_or_create_camera_config,
@@ -1546,55 +1598,6 @@ def api_get_camera_status():
     """
     is_ptz = bool(leer_config_camara())
     return jsonify({"status": "ok", "camera_type": ("ptz" if is_ptz else "fixed"), "configured_is_ptz": is_ptz}), 200
-
-def _require_ptz_capable() -> None:
-    """Bloquea rutas PTZ cuando el Auto-Discovery determina cámara fija."""
-    with state_lock:
-        ok = bool(is_ptz_capable)
-    if not ok:
-        abort(403)
-
-
-def _ptz_discovered_capable() -> bool:
-    with state_lock:
-        return bool(is_ptz_capable)
-
-def _should_log_ptz_ready() -> bool:
-    v = (os.environ.get("DEBUG_PTZ_READY") or "").strip().lower()
-    return v in {"1", "true", "t", "yes", "y", "on"}
-
-
-def _log_ptz_ready(*, kind: str, ready: bool, configured: bool, discovered: bool) -> None:
-    global _last_ptz_ready_automation, _last_ptz_ready_manual
-    if _should_log_ptz_ready():
-        print("[PTZ_READY]", f"{kind}={bool(ready)} configured={bool(configured)} discovered={bool(discovered)}")
-        return
-    if str(kind) == "automation":
-        if _last_ptz_ready_automation is None or bool(_last_ptz_ready_automation) != bool(ready):
-            _last_ptz_ready_automation = bool(ready)
-            print("[PTZ_READY]", f"automation={bool(ready)} configured={bool(configured)} discovered={bool(discovered)}")
-        return
-    if str(kind) == "manual":
-        if _last_ptz_ready_manual is None or bool(_last_ptz_ready_manual) != bool(ready):
-            _last_ptz_ready_manual = bool(ready)
-            print("[PTZ_READY]", f"manual={bool(ready)} configured={bool(configured)} discovered={bool(discovered)}")
-        return
-
-
-def is_ptz_ready_for_manual() -> bool:
-    configured_ptz = bool(is_camera_configured_ptz())
-    discovered = bool(_ptz_discovered_capable())
-    ready = bool(configured_ptz or discovered)
-    _log_ptz_ready(kind="manual", ready=ready, configured=configured_ptz, discovered=discovered)
-    return bool(ready)
-
-
-def is_ptz_ready_for_automation() -> bool:
-    configured_ptz = bool(is_camera_configured_ptz())
-    discovered = bool(_ptz_discovered_capable())
-    ready = bool(configured_ptz or discovered)
-    _log_ptz_ready(kind="automation", ready=ready, configured=configured_ptz, discovered=discovered)
-    return bool(ready)
 
 init_automation_routes(
     role_required=role_required,
