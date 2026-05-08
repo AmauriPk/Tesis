@@ -63,6 +63,7 @@ from src.services.ptz_state_service import PTZStateService
 from src.services.ptz_worker_service import PTZCommandWorker
 from src.services.tracking_worker_service import TrackingPTZWorker
 from src.services.media_service import safe_join as _safe_join, safe_rel_path as _safe_rel_path
+from src.services.file_cleanup_service import cleanup_old_evidence as _cleanup_old_evidence
 from src.routes.analysis import analysis_bp, init_analysis_routes
 from src.routes.events import events_bp, init_events_routes
 from src.routes.dataset import dataset_bp, init_dataset_routes
@@ -896,107 +897,14 @@ def diag():
 
 # ======================== UI ========================
 def cleanup_old_evidence(*, dry_run: bool = True) -> dict:
-    """
-    Limpieza segura de evidencias para no saturar disco.
-
-    - No se ejecuta automáticamente.
-    - Por defecto `dry_run=True` (solo reporta).
-    """
-    evidence_dir = (os.environ.get("EVIDENCE_DIR") or EVIDENCE_DIR).strip() or EVIDENCE_DIR
-    max_files = int(_env_int("EVIDENCE_MAX_FILES", 500))
-    max_age_days = int(_env_int("EVIDENCE_MAX_AGE_DAYS", 30))
-    max_files = max(50, min(5000, int(max_files)))
-    max_age_days = max(1, min(365, int(max_age_days)))
-
-    abs_dir = evidence_dir
-    if not os.path.isabs(abs_dir):
-        abs_dir = os.path.join(app.root_path, evidence_dir)
-    abs_dir = os.path.abspath(abs_dir)
-
-    kept_refs: set[str] = set()
-    db_path = _get_metrics_db_path_abs()
-    try:
-        if os.path.exists(db_path):
-            con = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
-            con.row_factory = sqlite3.Row
-            try:
-                _ensure_detection_events_schema(con)
-                cur = con.cursor()
-                cur.execute(
-                    """
-                    SELECT best_evidence_path
-                    FROM detection_events
-                    ORDER BY id DESC
-                    LIMIT 200
-                    """
-                )
-                for r in cur.fetchall() or []:
-                    p = (r["best_evidence_path"] or "").replace("\\", "/").lstrip("/")
-                    if p:
-                        kept_refs.add(p)
-            finally:
-                try:
-                    con.close()
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
-    try:
-        if not os.path.isdir(abs_dir):
-            return {"ok": True, "evidence_dir": abs_dir, "files_deleted": 0, "dry_run": dry_run, "reason": "missing_dir"}
-
-        now = time.time()
-        max_age_s = float(max_age_days) * 86400.0
-        files = []
-        for name in os.listdir(abs_dir):
-            if not name.lower().endswith((".jpg", ".jpeg", ".png")):
-                continue
-            abs_path = os.path.join(abs_dir, name)
-            try:
-                st = os.stat(abs_path)
-            except Exception:
-                continue
-            rel_path = os.path.relpath(abs_path, app.root_path).replace("\\", "/")
-            files.append({"abs": abs_path, "rel": rel_path, "mtime": float(st.st_mtime)})
-
-        to_delete = []
-        for f in files:
-            age_s = now - float(f["mtime"])
-            if age_s > max_age_s and f["rel"].replace("\\", "/") not in kept_refs:
-                to_delete.append(f)
-
-        files_sorted = sorted(files, key=lambda x: float(x["mtime"]))
-        if len(files_sorted) - len(to_delete) > max_files:
-            for f in files_sorted:
-                if len(files_sorted) - len(to_delete) <= max_files:
-                    break
-                if f["rel"].replace("\\", "/") in kept_refs:
-                    continue
-                if f not in to_delete:
-                    to_delete.append(f)
-
-        deleted = 0
-        for f in to_delete:
-            if dry_run:
-                continue
-            try:
-                os.remove(f["abs"])
-                deleted += 1
-            except Exception:
-                continue
-
-        return {
-            "ok": True,
-            "evidence_dir": abs_dir,
-            "dry_run": bool(dry_run),
-            "files_total": len(files),
-            "files_marked": len(to_delete),
-            "files_deleted": deleted,
-            "kept_refs": len(kept_refs),
-        }
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    return _cleanup_old_evidence(
+        root_path=app.root_path,
+        evidence_dir_default=EVIDENCE_DIR,
+        get_metrics_db_path_abs=_get_metrics_db_path_abs,
+        env_int=_env_int,
+        ensure_detection_events_schema=_ensure_detection_events_schema,
+        dry_run=bool(dry_run),
+    )
 
 init_dataset_routes(
     role_required=role_required,
