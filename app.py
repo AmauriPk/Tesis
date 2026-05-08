@@ -64,6 +64,7 @@ from src.services.ptz_worker_service import PTZCommandWorker
 from src.services.tracking_worker_service import TrackingPTZWorker
 from src.services.media_service import safe_join as _safe_join, safe_rel_path as _safe_rel_path
 from src.services.file_cleanup_service import cleanup_old_evidence as _cleanup_old_evidence
+from src.services.model_params_service import ModelParamsService
 from src.routes.analysis import analysis_bp, init_analysis_routes
 from src.routes.events import events_bp, init_events_routes
 from src.routes.dataset import dataset_bp, init_dataset_routes
@@ -329,7 +330,8 @@ camera_source_mode = "fixed"  # fixed | ptz (autodescubrimiento ONVIF)
 
 # ======================== MODEL PARAMS (Admin RBAC) ========================
 # ParametrizaciÃ³n operativa ajustable en procesamiento de flujo (Admin).
-model_params_lock = threading.Lock()
+model_params_service = ModelParamsService(env_float=_env_float, env_int=_env_int)
+model_params_lock = model_params_service.lock
 
 # ======================== CONFIGURED HW STATE (Admin) ========================
 # Fuente de verdad de negocio: lo que el Administrador dejÃ³ configurado.
@@ -356,11 +358,7 @@ def _tracking_target_is_recent() -> tuple[bool, float]:
 
 # _env_float() and _env_int() are now imported from config.py (consolidation of duplicated code)
 
-MODEL_PARAMS = {
-    "confidence_threshold": float(_env_float("CONFIDENCE_THRESHOLD", 0.60)),
-    "persistence_frames": int(max(1, _env_int("PERSISTENCE_FRAMES", 3))),
-    "iou_threshold": float(_env_float("IOU_THRESHOLD", 0.45)),
-}
+MODEL_PARAMS = model_params_service.model_params
 
 def get_model_params() -> dict:
     """
@@ -369,8 +367,7 @@ def get_model_params() -> dict:
     Returns:
         Diccionario con llaves como `confidence_threshold`, `persistence_frames`, `iou_threshold`.
     """
-    with model_params_lock:
-        return dict(MODEL_PARAMS)
+    return model_params_service.get_model_params()
 
 def update_model_params(*, confidence_threshold: float, persistence_frames: int, iou_threshold: float) -> dict:
     """
@@ -388,25 +385,24 @@ def update_model_params(*, confidence_threshold: float, persistence_frames: int,
         Copia actualizada de los parÃ¡metros del modelo.
     """
     global DETECTION_PERSISTENCE_FRAMES
-    with model_params_lock:
-        MODEL_PARAMS["confidence_threshold"] = float(confidence_threshold)
-        MODEL_PARAMS["persistence_frames"] = int(max(1, int(persistence_frames)))
-        MODEL_PARAMS["iou_threshold"] = float(iou_threshold)
-        try:
-            DETECTION_PERSISTENCE_FRAMES = int(MODEL_PARAMS["persistence_frames"])
-        except Exception:
-            # NOTE: Idealmente capturar (TypeError, ValueError) si se esperan problemas de conversiÃ³n.
-            pass
-        return dict(MODEL_PARAMS)
+    updated = model_params_service.update_model_params(
+        confidence_threshold=confidence_threshold,
+        persistence_frames=persistence_frames,
+        iou_threshold=iou_threshold,
+    )
+    try:
+        DETECTION_PERSISTENCE_FRAMES = int(updated["persistence_frames"])
+    except Exception:
+        # NOTE: Idealmente capturar (TypeError, ValueError) si se esperan problemas de conversiÃ³n.
+        pass
+    return dict(updated)
 
 # Mitigación de aves:
 # Requiere que la detección "persista" por N frames consecutivos antes de marcar `detected=True`
 # y antes de activar tracking PTZ automático. Esto reduce falsos positivos por aves/ruido.
 try:
-    raw_dpf = os.environ.get("DETECTION_PERSISTENCE_FRAMES", "3").strip()
-    DETECTION_PERSISTENCE_FRAMES = max(1, int(raw_dpf))
-except (ValueError, TypeError) as e:
-    print(f"[WARN] DETECTION_PERSISTENCE_FRAMES='{raw_dpf}' invalid: {e}, using default=3")
+    DETECTION_PERSISTENCE_FRAMES = int(model_params_service.get_detection_persistence_frames())
+except Exception:
     DETECTION_PERSISTENCE_FRAMES = 3
 
 # Autodescubrimiento de hardware (NO confiar en selector manual).
