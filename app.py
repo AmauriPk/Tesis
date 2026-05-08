@@ -58,6 +58,7 @@ from src.services.detection_event_service import (
     _ensure_detection_events_schema,
     _parse_iso_ts_to_epoch,
 )
+from src.services.inspection_patrol_service import _InspectionPatrolWorker
 from src.services.ptz_state_service import PTZStateService
 from src.services.ptz_worker_service import PTZCommandWorker
 from src.services.tracking_worker_service import TrackingPTZWorker
@@ -598,151 +599,7 @@ def _p_control_speed(error: float, *, deadzone: float, max_speed: float, k: floa
     v = _clamp(float(k) * float(max_speed) * scaled, 0.0, float(max_speed))
     return v if e > 0 else -v
 
-class _InspectionPatrolWorker:
-    """
-    Patrullaje automÃ¡tico:
-    - Solo aplica si hardware PTZ (fail-safe por autodescubrimiento ONVIF).
-    - Si no hay detecciÃ³n confirmada en los Ãºltimos N segundos, pan lento y continuo.
-    - Si aparece amenaza (detecciÃ³n confirmada), se interrumpe y el tracking toma control.
-    """
-    def __init__(self, *, idle_s: float = 10.0):
-        """
-        Crea el worker de patrullaje.
-
-        Args:
-            idle_s: Segundos sin deteccion confirmada tras los cuales inicia el barrido PTZ.
-
-        Returns:
-            None.
-        """
-        self._idle_s = float(idle_s)
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._patrolling = False
-        self._dir = 1.0
-        self._segment_started_at: float | None = None
-        self._next_action_at = 0.0
-        self._phase = "move"  # move -> stop_wait -> move...
-        self._stop_sent_in_pause = False
-    def start(self):
-        """
-        Inicia el hilo de patrullaje (idempotente).
-
-        Returns:
-            None.
-        """
-        if not self._thread.is_alive():
-            self._thread.start()
-    def _run(self):
-        """
-        Loop del patrullaje:
-
-        - Si hay deteccion confirmada => desactiva inspection y emite STOP PTZ.
-        - Si no hay deteccion por `idle_s` => pan lento con sweep de duracion limitada.
-        - Si hay tracking activo => el tracking tiene prioridad y el patrullaje se apaga.
-
-        Returns:
-            None.
-        """
-        while not self._stop.is_set():
-            try:
-                time.sleep(0.25)
-                with state_lock:
-                    enabled = bool(get_inspection_mode_enabled())
-                    tracking = bool(get_auto_tracking_enabled())
-                    detected = bool(current_detection_state.get("detected"))
-                ptz_ok = bool(is_ptz_ready_for_automation())
-                has_recent_target, _age = _tracking_target_is_recent()
-                paused_by_detection = bool(tracking and detected)
-                paused_by_tracking_target = bool(tracking and has_recent_target)
-
-                if not enabled or not ptz_ok:
-                    if self._patrolling:
-                        ptz_worker.enqueue_stop()
-                        self._patrolling = False
-                    self._segment_started_at = None
-                    self._phase = "move"
-                    self._next_action_at = 0.0
-                    self._stop_sent_in_pause = False
-                    continue
-
-                now = time.time()
-                mode = (os.environ.get("PTZ_INSPECTION_MODE") or "sweep").strip().lower() or "sweep"
-                speed = float(_env_float("PTZ_INSPECTION_SPEED", 0.45))
-                duration = float(_env_float("PTZ_INSPECTION_DURATION", 4.0))
-                pause = float(_env_float("PTZ_INSPECTION_PAUSE", 0.7))
-                if mode == "sweep":
-                    speed = _clamp(abs(float(speed)), 0.05, 1.00)
-                    duration = _clamp(float(duration), 1.0, 30.0)
-                    pause = _clamp(float(pause), 0.2, 5.0)
-                else:
-                    speed = _clamp(abs(float(speed)), 0.05, 0.80)
-                    duration = _clamp(float(duration), 0.5, 8.0)
-                    pause = _clamp(float(pause), 0.2, 3.0)
-                x_speed = float(speed) * float(self._dir)
-
-                if paused_by_detection or paused_by_tracking_target:
-                    if self._patrolling and not self._stop_sent_in_pause:
-                        ptz_worker.enqueue_stop()
-                        self._stop_sent_in_pause = True
-                        print(
-                            "[INSPECTION_CMD]",
-                            f"phase=stop paused_by_tracking={bool(paused_by_tracking_target)} paused_by_detection={bool(paused_by_detection)}",
-                        )
-                    self._patrolling = False
-                    self._phase = "move"
-                    self._next_action_at = 0.0
-                    continue
-
-                self._stop_sent_in_pause = False
-
-                if float(self._next_action_at) > 0.0 and now < float(self._next_action_at):
-                    continue
-
-                phase = str(self._phase)
-                if phase == "move":
-                    continuous_360 = (os.environ.get("PTZ_INSPECTION_CONTINUOUS_360") or "1").strip().lower() in {
-                        "1",
-                        "true",
-                        "t",
-                        "yes",
-                        "y",
-                        "on",
-                    }
-                    mode_txt = "continuous_360" if continuous_360 else "sweep"
-                    ptz_worker.enqueue_move(x=float(x_speed), y=0.0, zoom=0.0, duration_s=float(duration), source="inspection")
-                    self._patrolling = True
-                    self._phase = "wait_stop"
-                    self._next_action_at = now + float(duration)
-                    print(
-                        "[INSPECTION_CMD]",
-                        f"phase=move mode={mode_txt} direction={'right' if self._dir > 0 else 'left'} x={float(x_speed):.2f} duration={float(duration):.1f}",
-                    )
-                elif phase == "wait_stop":
-                    ptz_worker.enqueue_stop()
-                    self._patrolling = False
-                    self._phase = "wait_pause"
-                    self._next_action_at = now + float(pause)
-                    print("[INSPECTION_CMD]", "phase=stop")
-                else:  # wait_pause
-                    continuous_360 = (os.environ.get("PTZ_INSPECTION_CONTINUOUS_360") or "1").strip().lower() in {
-                        "1",
-                        "true",
-                        "t",
-                        "yes",
-                        "y",
-                        "on",
-                    }
-                    if not continuous_360:
-                        self._dir = -1.0 * float(self._dir)
-                    self._phase = "move"
-                    self._next_action_at = 0.0
-                    print(
-                        "[INSPECTION_CMD]",
-                        f"phase=pause_done next_direction={'right' if self._dir > 0 else 'left'}",
-                    )
-            except Exception as e:
-                print(f"[INSPECTION_WORKER][ERROR] {e}")
+## Worker de patrullaje movido a `src/services/inspection_patrol_service.py`
 def _select_priority_detection(detection_list: list[dict]) -> dict | None:
     """
     Regla de priorización (Enjambre):
@@ -935,7 +792,18 @@ ptz_worker = PTZCommandWorker(
 )
 ptz_worker.start()
 
-inspection_worker = _InspectionPatrolWorker(idle_s=10.0)
+inspection_worker = _InspectionPatrolWorker(
+    idle_s=10.0,
+    ptz_worker=ptz_worker,
+    state_lock=state_lock,
+    current_detection_state=current_detection_state,
+    get_inspection_mode_enabled=get_inspection_mode_enabled,
+    set_inspection_mode_enabled=set_inspection_mode_enabled,
+    get_auto_tracking_enabled=get_auto_tracking_enabled,
+    is_ptz_ready_for_automation=is_ptz_ready_for_automation,
+    tracking_target_is_recent=_tracking_target_is_recent,
+    clamp=_clamp,
+)
 inspection_worker.start()
 
 tracking_worker = TrackingPTZWorker(
