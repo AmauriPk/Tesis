@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import struct
 import time
 from datetime import datetime
 from typing import Any, Callable
@@ -112,8 +113,6 @@ def init_events_routes(**deps: Any) -> None:
                     print(f"[WARN] Panel de Alertas: no hay tablas esperadas en DB. tables={sorted(tables)}")
                     return jsonify({"status": "success", "alerts": []}), 200
                 alerts = []
-                import struct
-
                 def _to_int(v):
                     """
                     Convierte valores heterogeneos de SQLite/Numpy a int seguro.

@@ -67,12 +67,11 @@ def init_ptz_manual_routes(**deps: Any) -> None:
                 jsonify({"ok": False, "error": "PTZ manual bloqueado: la cámara no está configurada como PTZ"}),
                 403,
             )
-        with app.app_context():
-            cfg = get_or_create_camera_config()
-            host = (cfg.onvif_host or "").strip()
-            username = (cfg.onvif_username or "").strip()
-            password = (cfg.onvif_password or "").strip()
-            _ = normalized_onvif_port(cfg.onvif_port)
+        cfg = get_or_create_camera_config()
+        host = (cfg.onvif_host or "").strip()
+        username = (cfg.onvif_username or "").strip()
+        password = (cfg.onvif_password or "").strip()
+        _ = normalized_onvif_port(cfg.onvif_port)
 
         if not host:
             return jsonify({"ok": False, "error": "ONVIF_HOST no configurado."}), 400
