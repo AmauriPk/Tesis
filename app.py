@@ -80,6 +80,7 @@ from src.services.camera_state_service import (
     set_configured_camera_type,
     is_camera_configured_ptz,
 )
+from src.services.ptz_state_service import PTZStateService
 from src.routes.analysis import analysis_bp, init_analysis_routes
 from src.routes.events import events_bp, init_events_routes
 from src.routes.dataset import dataset_bp, init_dataset_routes
@@ -703,7 +704,8 @@ def _metrics_enqueue_with_events(record: FrameRecord) -> None:
 yolo_model = load_yolo_model()
 
 # ======================== LIVE STATE ========================
-state_lock = threading.Lock()
+ptz_state_service = PTZStateService()
+state_lock = ptz_state_service.state_lock
 stream_lock = threading.Lock()
 
 camera_source_mode = "fixed"  # fixed | ptz (autodescubrimiento ONVIF)
@@ -717,33 +719,11 @@ model_params_lock = threading.Lock()
 # Esto NO hace ping a la cÃ¡mara: sÃ³lo refleja configuraciÃ³n persistida / Ãºltimo test admin.
 
 def _update_tracking_target(payload: dict) -> None:
-    global _last_tracking_target_log_at, _last_tracking_target_bbox
-    try:
-        has_target = bool(payload.get("has_target"))
-        bbox = payload.get("bbox")
-        with tracking_target_lock:
-            tracking_target_state["has_target"] = bool(has_target)
-            tracking_target_state["bbox"] = bbox if has_target else None
-            tracking_target_state["frame_w"] = payload.get("frame_w")
-            tracking_target_state["frame_h"] = payload.get("frame_h")
-            tracking_target_state["confidence"] = float(payload.get("confidence") or 0.0)
-            tracking_target_state["updated_at"] = float(payload.get("updated_at") or time.time())
-        if has_target and bbox:
-            now = time.time()
-            if bbox != _last_tracking_target_bbox or (now - float(_last_tracking_target_log_at)) > 1.0:
-                _last_tracking_target_bbox = bbox
-                _last_tracking_target_log_at = now
-                print(
-                    "[TRACKING_TARGET]",
-                    f"bbox={tuple(bbox)} conf={float(payload.get('confidence') or 0.0):.3f} updated=True",
-                )
-    except Exception:
-        pass
+    ptz_state_service.update_tracking_target(payload)
 
 
 def _get_tracking_target_snapshot() -> dict:
-    with tracking_target_lock:
-        return dict(tracking_target_state)
+    return ptz_state_service.get_tracking_target_snapshot()
 
 
 def _tracking_target_is_recent() -> tuple[bool, float]:
@@ -814,8 +794,6 @@ except (ValueError, TypeError) as e:
 
 # Autodescubrimiento de hardware (NO confiar en selector manual).
 is_ptz_capable = False
-auto_tracking_enabled = False
-inspection_mode_enabled = False
 last_confirmed_detection_at: float | None = None
 _onvif_last_probe_at: float | None = None
 _onvif_last_probe_error: str | None = None
@@ -824,26 +802,23 @@ _last_ptz_ready_manual: bool | None = None
 
 
 def set_auto_tracking_enabled(value: bool) -> None:
-    global auto_tracking_enabled
-    auto_tracking_enabled = bool(value)
+    ptz_state_service.set_auto_tracking_enabled(bool(value))
+
+
+def get_auto_tracking_enabled() -> bool:
+    return bool(ptz_state_service.get_auto_tracking_enabled())
 
 
 def set_inspection_mode_enabled(value: bool) -> None:
-    global inspection_mode_enabled
-    inspection_mode_enabled = bool(value)
+    ptz_state_service.set_inspection_mode_enabled(bool(value))
+
+
+def get_inspection_mode_enabled() -> bool:
+    return bool(ptz_state_service.get_inspection_mode_enabled())
 
 # Tracking PTZ (separado del hilo de video)
-tracking_target_lock = threading.Lock()
-tracking_target_state = {
-    "has_target": False,
-    "bbox": None,
-    "frame_w": None,
-    "frame_h": None,
-    "confidence": 0.0,
-    "updated_at": 0.0,
-}
-_last_tracking_target_log_at = 0.0
-_last_tracking_target_bbox = None
+tracking_target_lock = ptz_state_service.tracking_target_lock
+tracking_target_state = ptz_state_service.tracking_target_state
 
 current_detection_state = {
     "status": "Zona despejada",
@@ -1056,13 +1031,12 @@ class _InspectionPatrolWorker:
         Returns:
             None.
         """
-        global inspection_mode_enabled
         while not self._stop.is_set():
             try:
                 time.sleep(0.25)
                 with state_lock:
-                    enabled = bool(inspection_mode_enabled)
-                    tracking = bool(auto_tracking_enabled)
+                    enabled = bool(get_inspection_mode_enabled())
+                    tracking = bool(get_auto_tracking_enabled())
                     detected = bool(current_detection_state.get("detected"))
                 ptz_ok = bool(is_ptz_ready_for_automation())
                 has_recent_target, _age = _tracking_target_is_recent()
@@ -1178,7 +1152,7 @@ class _TrackingPTZWorker:
             try:
                 time.sleep(0.20)
                 with state_lock:
-                    enabled = bool(auto_tracking_enabled)
+                    enabled = bool(get_auto_tracking_enabled())
                 ptz_ok = bool(is_ptz_ready_for_automation())
                 if not enabled or not ptz_ok:
                     if self._was_moving:
@@ -1396,14 +1370,14 @@ def _set_ptz_capable(value: bool, *, error: str | None = None) -> None:
     - Si el hardware NO es PTZ: se deshabilita `auto_tracking_enabled` por seguridad.
     - Esto es parte del "bloqueo de rutas de movimiento" cuando la cámara es fija.
     """
-    global is_ptz_capable, camera_source_mode, _onvif_last_probe_error, auto_tracking_enabled, inspection_mode_enabled
+    global is_ptz_capable, camera_source_mode, _onvif_last_probe_error
     with state_lock:
         is_ptz_capable = bool(value)
         _onvif_last_probe_error = error
         configured_ptz = bool(is_camera_configured_ptz())
         if (not is_ptz_capable) and (not configured_ptz):
-            auto_tracking_enabled = False
-            inspection_mode_enabled = False
+            set_auto_tracking_enabled(False)
+            set_inspection_mode_enabled(False)
         camera_source_mode = "ptz" if (is_ptz_capable or configured_ptz) else "fixed"
         current_detection_state["camera_source_mode"] = camera_source_mode
 
@@ -1773,7 +1747,7 @@ live_processor = LiveVideoProcessor(
     metrics_enqueue=_metrics_enqueue_with_events,
     make_frame_record=FrameRecord,
     get_camera_mode=lambda: str(camera_source_mode),
-    is_tracking_enabled=lambda: bool(auto_tracking_enabled) and bool(is_ptz_ready_for_automation()),
+    is_tracking_enabled=lambda: bool(get_auto_tracking_enabled()) and bool(is_ptz_ready_for_automation()),
     is_camera_configured_ptz=is_camera_configured_ptz,
     ptz_move=_ptz_tracking_move,
     ptz_stop=ptz_worker.enqueue_stop,
@@ -2056,9 +2030,9 @@ init_automation_routes(
     ptz_worker=ptz_worker,
     is_camera_configured_ptz=is_camera_configured_ptz,
     is_ptz_ready_for_automation=is_ptz_ready_for_automation,
-    get_auto_tracking_enabled=lambda: bool(auto_tracking_enabled),
+    get_auto_tracking_enabled=get_auto_tracking_enabled,
     set_auto_tracking_enabled=set_auto_tracking_enabled,
-    get_inspection_mode_enabled=lambda: bool(inspection_mode_enabled),
+    get_inspection_mode_enabled=get_inspection_mode_enabled,
     set_inspection_mode_enabled=set_inspection_mode_enabled,
     current_detection_state=current_detection_state,
 )
@@ -2078,7 +2052,7 @@ init_ptz_manual_routes(
     get_or_create_camera_config=get_or_create_camera_config,
     normalized_onvif_port=_normalized_onvif_port,
     clamp=_clamp,
-    get_auto_tracking_enabled=lambda: bool(auto_tracking_enabled),
+    get_auto_tracking_enabled=get_auto_tracking_enabled,
     set_auto_tracking_enabled=set_auto_tracking_enabled,
 )
 app.register_blueprint(ptz_manual_bp)
