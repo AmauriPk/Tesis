@@ -72,7 +72,7 @@ app = Flask(__name__)
 _secret_env = (os.environ.get("FLASK_SECRET_KEY") or "").strip()
 if not _secret_env:
     # Fallback solo para desarrollo / demo local. En entornos reales configurar FLASK_SECRET_KEY.
-    print("[SECURITY][WARN] FLASK_SECRET_KEY no configurada; usando clave de desarrollo.")
+    print("[SECURITY][WARN] FLASK_SECRET_KEY no configurada; usando clave de desarrollo. No usar así en demo/producción.")
     _secret_env = "dev-secret-change-me"
 app.secret_key = _secret_env
 

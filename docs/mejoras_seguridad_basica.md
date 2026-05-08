@@ -12,7 +12,7 @@ Aplicar mejoras de seguridad **de bajo riesgo** antes de una demostración, sin 
 
 - `app.py` ahora lee `FLASK_SECRET_KEY` desde variable de entorno.
 - Si no está configurada (vacía o ausente), se mantiene un fallback de desarrollo y se imprime:
-  - `[SECURITY][WARN] FLASK_SECRET_KEY no configurada; usando clave de desarrollo.`
+  - `[SECURITY][WARN] FLASK_SECRET_KEY no configurada; usando clave de desarrollo. No usar así en demo/producción.`
 
 Esto evita depender silenciosamente de una clave fija en demos/producción.
 
@@ -36,5 +36,24 @@ En `bootstrap_users()` (solo cuando la tabla de usuarios está vacía):
 
 - No se imprime ninguna contraseña completa en logs.
 - No se tocaron rutas, endpoints, HTML o JavaScript.
-- `.gitignore` ya contiene reglas para evitar subir `.env`, `config_camara.json`, DBs, modelos y carpetas de runtime/resultados.
+- `.gitignore` fue revisado y cubre archivos sensibles / pesados (env, config local, DBs, modelos, uploads y resultados).
 
+## Variables de entorno recomendadas (ejemplo, sin valores reales)
+
+- `FLASK_SECRET_KEY=<clave_larga_generada>`
+- `DEFAULT_ADMIN_PASSWORD=<contraseña_segura>`
+- `DEFAULT_OPERATOR_PASSWORD=<contraseña_segura>`
+
+## Logs sensibles (revisión)
+
+- Se evitó imprimir contraseñas completas (solo `password_configurada` y `password_len`).
+- Se revisó que no se esté imprimiendo `FLASK_SECRET_KEY` ni volcados completos de `.env`.
+- RTSP/ONVIF: no se agregaron logs nuevos con credenciales; si en el futuro se imprime una URL RTSP, debe enmascararse (p. ej. `rtsp://user:***@host/...`).
+
+## Permisos de rutas (revisión)
+
+Revisión básica: las rutas administrativas permanecen con `role_required("admin")` y las del operador con `role_required("operator")` / `login_required` según correspondía. No se hicieron cambios de permisos en esta mejora para evitar riesgo.
+
+## Pendientes post-defensa
+
+- CSRF (no implementado en este cambio por riesgo de romper formularios/POST).

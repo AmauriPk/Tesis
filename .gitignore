@@ -57,6 +57,10 @@ Indicacion para git.txt
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
 
 # Modelos exportados
 *.onnx
