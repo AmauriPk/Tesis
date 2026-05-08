@@ -72,6 +72,14 @@ from src.services.video_export_service import (
     resolve_ffmpeg_bin,
     is_valid_video_file,
 )
+from src.services.camera_state_service import (
+    init_camera_state_service,
+    guardar_config_camara,
+    leer_config_camara,
+    get_configured_camera_type,
+    set_configured_camera_type,
+    is_camera_configured_ptz,
+)
 from src.routes.analysis import analysis_bp, init_analysis_routes
 from src.routes.events import events_bp, init_events_routes
 from src.routes.dataset import dataset_bp, init_dataset_routes
@@ -85,6 +93,8 @@ from src.routes.automation import automation_bp, init_automation_routes
 # ======================== APP / DB ========================
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
+
+init_camera_state_service(root_path=app.root_path)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///app.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
@@ -706,92 +716,6 @@ model_params_lock = threading.Lock()
 # Fuente de verdad de negocio: lo que el Administrador dejÃ³ configurado.
 # Esto NO hace ping a la cÃ¡mara: sÃ³lo refleja configuraciÃ³n persistida / Ãºltimo test admin.
 
-def _camera_cfg_path() -> str:
-    """
-    Construye la ruta absoluta del archivo de configuraciÃ³n de cÃ¡mara.
-
-    Returns:
-        Ruta absoluta a `config_camara.json` dentro del `app.root_path`.
-    """
-    return os.path.join(app.root_path, "config_camara.json")
-
-def guardar_config_camara(is_ptz: bool) -> None:
-    """Persiste en disco si la cámara está configurada como PTZ o Fija."""
-    path = _camera_cfg_path()
-    tmp = f"{path}.tmp"
-    payload = {"is_ptz": bool(is_ptz)}
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
-
-def leer_config_camara() -> bool:
-    """Lee `config_camara.json` y retorna is_ptz. Si no existe, False."""
-    path = _camera_cfg_path()
-    debug = os.environ.get("DEBUG_CAMERA_CFG", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}
-    global _last_camera_cfg_is_ptz
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f) or {}
-        value = bool(data.get("is_ptz", False))
-        if debug or (_last_camera_cfg_is_ptz is None) or (bool(_last_camera_cfg_is_ptz) != bool(value)):
-            print(f"[CAMERA_CFG] read {path} -> is_ptz={value}")
-        _last_camera_cfg_is_ptz = bool(value)
-        return value
-    except FileNotFoundError:
-        print(f"[CAMERA_CFG] read {path} -> MISSING (default False)")
-        return False
-    except (json.JSONDecodeError, ValueError, KeyError) as e:
-        print(f"[CAMERA_CFG] read {path} -> PARSE ERROR: {e} (default False)")
-        # Fail-safe: ante corrupciones/parcial, asumir fija.
-        return False
-
-def get_configured_camera_type() -> str:
-    """
-    Obtiene el tipo de cÃ¡mara configurado por el administrador.
-
-    La fuente de verdad es el archivo JSON persistente (`config_camara.json`).
-
-    Returns:
-        `"ptz"` si la configuraciÃ³n persistida indica PTZ; en caso contrario `"fixed"`.
-    """
-    return "ptz" if leer_config_camara() else "fixed"
-
-def set_configured_camera_type(camera_type: str) -> str:
-    """
-    Normaliza y persiste el tipo de cÃ¡mara configurado por el administrador.
-
-    Este setter no realiza autodescubrimiento ni test de conectividad; sÃ³lo persiste la
-    decisiÃ³n de negocio para que UI/threads puedan reaccionar consistentemente.
-
-    Args:
-        camera_type: Tipo solicitado (`"fixed"` o `"ptz"`). Cualquier otro valor se
-            normaliza a `"fixed"`.
-
-    Returns:
-        El tipo normalizado que se terminÃ³ persisitiendo (`"fixed"` o `"ptz"`).
-    """
-    ct = (camera_type or "fixed").strip().lower()
-    if ct not in {"fixed", "ptz"}:
-        ct = "fixed"
-    # Persistir en disco (lo que realmente usan threads/UI).
-    try:
-        guardar_config_camara(ct == "ptz")
-    except Exception:
-        # Fail-safe: no tumbar la app por persistencia.
-        pass
-    return ct
-
-def is_camera_configured_ptz() -> bool:
-    """
-    Indica si la cÃ¡mara estÃ¡ configurada como PTZ en disco.
-
-    Returns:
-        True si el administrador dejÃ³ configurado PTZ (persistido); de lo contrario False.
-    """
-    return bool(leer_config_camara())
-
-
 def _update_tracking_target(payload: dict) -> None:
     global _last_tracking_target_log_at, _last_tracking_target_bbox
     try:
@@ -893,7 +817,6 @@ is_ptz_capable = False
 auto_tracking_enabled = False
 inspection_mode_enabled = False
 last_confirmed_detection_at: float | None = None
-_last_camera_cfg_is_ptz: bool | None = None
 _onvif_last_probe_at: float | None = None
 _onvif_last_probe_error: str | None = None
 _last_ptz_ready_automation: bool | None = None
