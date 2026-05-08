@@ -1132,20 +1132,6 @@ class _InspectionPatrolWorker:
                     )
             except Exception as e:
                 print(f"[INSPECTION_WORKER][ERROR] {e}")
-inspection_worker = _InspectionPatrolWorker(idle_s=10.0)
-inspection_worker.start()
-
-tracking_worker = TrackingPTZWorker(
-    state_lock=state_lock,
-    ptz_worker=ptz_worker,
-    get_auto_tracking_enabled=get_auto_tracking_enabled,
-    is_ptz_ready_for_automation=is_ptz_ready_for_automation,
-    get_tracking_target_snapshot=_get_tracking_target_snapshot,
-    clamp=_clamp,
-)
-tracking_worker.start()
-
-
 def _select_priority_detection(detection_list: list[dict]) -> dict | None:
     """
     Regla de priorización (Enjambre):
@@ -1285,6 +1271,19 @@ ptz_worker = PTZCommandWorker(
     PTZController=PTZController,
 )
 ptz_worker.start()
+
+inspection_worker = _InspectionPatrolWorker(idle_s=10.0)
+inspection_worker.start()
+
+tracking_worker = TrackingPTZWorker(
+    state_lock=state_lock,
+    ptz_worker=ptz_worker,
+    get_auto_tracking_enabled=get_auto_tracking_enabled,
+    is_ptz_ready_for_automation=is_ptz_ready_for_automation,
+    get_tracking_target_snapshot=_get_tracking_target_snapshot,
+    clamp=_clamp,
+)
+tracking_worker.start()
 # ======================== LIVE STREAM (RTSP + MODELO DE VISION) ========================
 
 def _get_live_rtsp_url() -> str | None:

@@ -39,6 +39,7 @@ Para evitar importar `app.py`, el constructor recibe:
 - Se conserva el arranque del worker:
   - `tracking_worker = TrackingPTZWorker(...)`
   - `tracking_worker.start()`
+- Nota: se corrigió el orden de inicialización en `app.py` para crear `ptz_worker` antes de inicializar workers o registrar Blueprints que lo reciben por inyección de dependencias.
 
 ## Qué NO se movió (pendiente)
 
@@ -65,4 +66,3 @@ Para evitar importar `app.py`, el constructor recibe:
 
 - El worker depende de `get_tracking_target_snapshot` para leer bbox/frame_w/frame_h; si el payload cambia, el tracking puede no emitir comandos.
 - La lógica de seguimiento no se modificó; el cambio es únicamente de ubicación del código.
-
