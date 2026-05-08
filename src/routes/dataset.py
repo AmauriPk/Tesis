@@ -15,6 +15,13 @@ _deps: dict[str, Any] = {}
 _routes_initialized = False
 
 
+def _get_dep(key: str):
+    try:
+        return _deps[key]
+    except KeyError as exc:
+        raise RuntimeError(f"Dependencia faltante en dataset: {key}") from exc
+
+
 def init_dataset_routes(**deps: Any) -> None:
     """
     Inicializa dependencias y registra rutas en el Blueprint.
@@ -28,14 +35,14 @@ def init_dataset_routes(**deps: Any) -> None:
         return
     _routes_initialized = True
 
-    role_required = _deps["role_required"]
-    safe_join: Callable[[str, str], str] = _deps["safe_join"]
+    role_required = _get_dep("role_required")
+    safe_join: Callable[[str, str], str] = _get_dep("safe_join")
 
-    dataset_recoleccion_folder = _deps["dataset_recoleccion_folder"]
-    dataset_training_root = _deps["dataset_training_root"]
-    dataset_negative_dir = _deps["dataset_negative_dir"]
-    dataset_positive_pending_dir = _deps["dataset_positive_pending_dir"]
-    dataset_limpias_inbox_dir = _deps["dataset_limpias_inbox_dir"]
+    dataset_recoleccion_folder = _get_dep("dataset_recoleccion_folder")
+    dataset_training_root = _get_dep("dataset_training_root")
+    dataset_negative_dir = _get_dep("dataset_negative_dir")
+    dataset_positive_pending_dir = _get_dep("dataset_positive_pending_dir")
+    dataset_limpias_inbox_dir = _get_dep("dataset_limpias_inbox_dir")
 
     def _dataset_recoleccion_root() -> str:
         """

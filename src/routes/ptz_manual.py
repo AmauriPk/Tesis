@@ -11,6 +11,13 @@ _deps: dict[str, Any] = {}
 _routes_initialized = False
 
 
+def _get_dep(key: str):
+    try:
+        return _deps[key]
+    except KeyError as exc:
+        raise RuntimeError(f"Dependencia faltante en ptz_manual: {key}") from exc
+
+
 def init_ptz_manual_routes(**deps: Any) -> None:
     """
     Inicializa dependencias y registra rutas PTZ manual en el Blueprint.
@@ -24,24 +31,24 @@ def init_ptz_manual_routes(**deps: Any) -> None:
         return
     _routes_initialized = True
 
-    app = _deps["app"]
-    role_required = _deps["role_required"]
-    ptz_worker = _deps["ptz_worker"]
+    app = _get_dep("app")
+    role_required = _get_dep("role_required")
+    ptz_worker = _get_dep("ptz_worker")
 
-    state_lock = _deps["state_lock"]
-    tracking_target_lock = _deps["tracking_target_lock"]
-    tracking_target_state = _deps["tracking_target_state"]
+    state_lock = _get_dep("state_lock")
+    tracking_target_lock = _get_dep("tracking_target_lock")
+    tracking_target_state = _get_dep("tracking_target_state")
 
-    is_camera_configured_ptz: Callable[[], bool] = _deps["is_camera_configured_ptz"]
-    ptz_discovered_capable: Callable[[], bool] = _deps["ptz_discovered_capable"]
-    is_ptz_ready_for_manual: Callable[[], bool] = _deps["is_ptz_ready_for_manual"]
+    is_camera_configured_ptz: Callable[[], bool] = _get_dep("is_camera_configured_ptz")
+    ptz_discovered_capable: Callable[[], bool] = _get_dep("ptz_discovered_capable")
+    is_ptz_ready_for_manual: Callable[[], bool] = _get_dep("is_ptz_ready_for_manual")
 
-    get_or_create_camera_config = _deps["get_or_create_camera_config"]
-    normalized_onvif_port: Callable[[int | None], int] = _deps["normalized_onvif_port"]
-    clamp: Callable[[float, float, float], float] = _deps["clamp"]
+    get_or_create_camera_config = _get_dep("get_or_create_camera_config")
+    normalized_onvif_port: Callable[[int | None], int] = _get_dep("normalized_onvif_port")
+    clamp: Callable[[float, float, float], float] = _get_dep("clamp")
 
-    get_auto_tracking_enabled: Callable[[], bool] = _deps["get_auto_tracking_enabled"]
-    set_auto_tracking_enabled: Callable[[bool], None] = _deps["set_auto_tracking_enabled"]
+    get_auto_tracking_enabled: Callable[[], bool] = _get_dep("get_auto_tracking_enabled")
+    set_auto_tracking_enabled: Callable[[bool], None] = _get_dep("set_auto_tracking_enabled")
 
     @ptz_manual_bp.post("/ptz_move", endpoint="ptz_move")
     @login_required
@@ -137,4 +144,3 @@ def init_ptz_manual_routes(**deps: Any) -> None:
                 }
             )
         return jsonify({"ok": True})
-

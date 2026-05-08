@@ -15,6 +15,13 @@ _deps: dict[str, Any] = {}
 _routes_initialized = False
 
 
+def _get_dep(key: str):
+    try:
+        return _deps[key]
+    except KeyError as exc:
+        raise RuntimeError(f"Dependencia faltante en events: {key}") from exc
+
+
 def init_events_routes(**deps: Any) -> None:
     """
     Inicializa dependencias y registra rutas en el Blueprint.
@@ -28,10 +35,10 @@ def init_events_routes(**deps: Any) -> None:
         return
     _routes_initialized = True
 
-    role_required = _deps["role_required"]
-    get_metrics_db_path_abs: Callable[[], str] = _deps["get_metrics_db_path_abs"]
-    ensure_detection_events_schema: Callable[[sqlite3.Connection], None] = _deps["ensure_detection_events_schema"]
-    parse_iso_ts_to_epoch: Callable[[str | None], float | None] = _deps["parse_iso_ts_to_epoch"]
+    role_required = _get_dep("role_required")
+    get_metrics_db_path_abs: Callable[[], str] = _get_dep("get_metrics_db_path_abs")
+    ensure_detection_events_schema: Callable[[sqlite3.Connection], None] = _get_dep("ensure_detection_events_schema")
+    parse_iso_ts_to_epoch: Callable[[str | None], float | None] = _get_dep("parse_iso_ts_to_epoch")
 
     @events_bp.get("/api/recent_alerts")
     @login_required
@@ -41,9 +48,9 @@ def init_events_routes(**deps: Any) -> None:
         Retorna las últimas detecciones confirmadas (para Panel de Alertas del Operador).
         Fail-safe: ante DB inexistente/bloqueada => lista vacía (200).
         """
-        db_path = _deps["storage_config"].get("db_path", "detections.db")
+        db_path = _get_dep("storage_config").get("db_path", "detections.db")
         if db_path and not os.path.isabs(db_path):
-            db_path = os.path.join(_deps["app_root_path"], db_path)
+            db_path = os.path.join(_get_dep("app_root_path"), db_path)
         limit_raw = (request.args.get("limit") or "").strip()
         try:
             limit = int(limit_raw) if limit_raw else 15
@@ -166,7 +173,7 @@ def init_events_routes(**deps: Any) -> None:
                             p = raw.replace("\\", "/")
                             if os.path.isabs(p):
                                 try:
-                                    root_abs = os.path.abspath(_deps["app_root_path"])
+                                    root_abs = os.path.abspath(_get_dep("app_root_path"))
                                     p_abs = os.path.abspath(p)
                                     if p_abs.startswith(root_abs):
                                         p = os.path.relpath(p_abs, root_abs).replace("\\", "/")
@@ -374,8 +381,8 @@ def init_events_routes(**deps: Any) -> None:
     def api_detection_summary():
         """Resumen estadístico de eventos/evidencias (para UI)."""
         db_path = get_metrics_db_path_abs()
-        evidence_dir = (os.environ.get("EVIDENCE_DIR") or _deps["evidence_dir"]).strip() or _deps["evidence_dir"]
-        abs_ev = evidence_dir if os.path.isabs(evidence_dir) else os.path.join(_deps["app_root_path"], evidence_dir)
+        evidence_dir = (os.environ.get("EVIDENCE_DIR") or _get_dep("evidence_dir")).strip() or _get_dep("evidence_dir")
+        abs_ev = evidence_dir if os.path.isabs(evidence_dir) else os.path.join(_get_dep("app_root_path"), evidence_dir)
         abs_ev = os.path.abspath(abs_ev)
 
         summary = {
@@ -454,8 +461,8 @@ def init_events_routes(**deps: Any) -> None:
         clear_evidence = bool(payload.get("clear_evidence"))
 
         db_path = get_metrics_db_path_abs()
-        evidence_dir = (os.environ.get("EVIDENCE_DIR") or _deps["evidence_dir"]).strip() or _deps["evidence_dir"]
-        abs_ev = evidence_dir if os.path.isabs(evidence_dir) else os.path.join(_deps["app_root_path"], evidence_dir)
+        evidence_dir = (os.environ.get("EVIDENCE_DIR") or _get_dep("evidence_dir")).strip() or _get_dep("evidence_dir")
+        abs_ev = evidence_dir if os.path.isabs(evidence_dir) else os.path.join(_get_dep("app_root_path"), evidence_dir)
         abs_ev = os.path.abspath(abs_ev)
 
         counts = {"raw_detections": 0, "events": 0, "evidence_files": 0}
@@ -577,4 +584,3 @@ def init_events_routes(**deps: Any) -> None:
             ),
             200,
         )
-

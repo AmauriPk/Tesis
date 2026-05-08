@@ -11,6 +11,13 @@ _deps: dict[str, Any] = {}
 _routes_initialized = False
 
 
+def _get_dep(key: str):
+    try:
+        return _deps[key]
+    except KeyError as exc:
+        raise RuntimeError(f"Dependencia faltante en model_params: {key}") from exc
+
+
 def init_model_params_routes(**deps: Any) -> None:
     """
     Inicializa dependencias y registra rutas de parámetros del modelo.
@@ -24,8 +31,8 @@ def init_model_params_routes(**deps: Any) -> None:
         return
     _routes_initialized = True
 
-    role_required = _deps["role_required"]
-    update_model_params: Callable[..., dict] = _deps["update_model_params"]
+    role_required = _get_dep("role_required")
+    update_model_params: Callable[..., dict] = _get_dep("update_model_params")
 
     @model_params_bp.post("/api/update_model_params")
     @login_required
@@ -58,4 +65,3 @@ def init_model_params_routes(**deps: Any) -> None:
 
         updated = update_model_params(confidence_threshold=conf, persistence_frames=persistence, iou_threshold=iou)
         return jsonify({"status": "success", "model_params": updated}), 200
-

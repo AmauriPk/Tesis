@@ -24,6 +24,13 @@ analysis_bp = Blueprint("analysis", __name__)
 _deps: dict[str, Any] = {}
 _routes_initialized = False
 
+# Helper para errores claros cuando falten dependencias inyectadas.
+def _get_dep(key: str):
+    try:
+        return _deps[key]
+    except KeyError as exc:
+        raise RuntimeError(f"Dependencia faltante en analysis: {key}") from exc
+
 # Estado de jobs de inferencia manual (solo usado por /upload_detect y /video_progress).
 job_lock = threading.Lock()
 progress_by_job: dict[str, dict] = {}
@@ -43,7 +50,7 @@ def init_analysis_routes(**deps: Any) -> None:
         return
     _routes_initialized = True
 
-    role_required = _deps["role_required"]
+    role_required = _get_dep("role_required")
 
     @analysis_bp.route("/video_progress")
     @login_required
@@ -85,7 +92,7 @@ def init_analysis_routes(**deps: Any) -> None:
                     ),
                     400,
                 )
-            if not _deps["allowed_file"](f.filename):
+            if not _get_dep("allowed_file")(f.filename):
                 return (
                     jsonify(
                         {
@@ -97,7 +104,7 @@ def init_analysis_routes(**deps: Any) -> None:
                     ),
                     400,
                 )
-            if _deps["yolo_model"] is None:
+            if _get_dep("yolo_model") is None:
                 return (
                     jsonify(
                         {
@@ -114,8 +121,8 @@ def init_analysis_routes(**deps: Any) -> None:
             ts = int(time.time())
             job_id = secrets.token_urlsafe(10)
             temp_name = f"{ts}_{job_id}_{filename}"
-            os.makedirs(_deps["app"].config["UPLOAD_FOLDER"], exist_ok=True)
-            temp_path = os.path.join(_deps["app"].config["UPLOAD_FOLDER"], temp_name)
+            os.makedirs(_get_dep("app").config["UPLOAD_FOLDER"], exist_ok=True)
+            temp_path = os.path.join(_get_dep("app").config["UPLOAD_FOLDER"], temp_name)
             f.save(temp_path)
 
             ext = filename.rsplit(".", 1)[1].lower()
@@ -126,9 +133,9 @@ def init_analysis_routes(**deps: Any) -> None:
                 stem = os.path.splitext(filename)[0].strip() or "video"
                 ts_folder = datetime.now().strftime("%Y%m%d_%H%M")
                 folder_base = f"{stem}_{ts_folder}"
-                analysis_root = os.path.join(_deps["app"].config["DATASET_RECOLECCION_FOLDER"], folder_base)
+                analysis_root = os.path.join(_get_dep("app").config["DATASET_RECOLECCION_FOLDER"], folder_base)
                 if os.path.exists(analysis_root):
-                    analysis_root = os.path.join(_deps["app"].config["DATASET_RECOLECCION_FOLDER"], f"{folder_base}_{job_id[:6]}")
+                    analysis_root = os.path.join(_get_dep("app").config["DATASET_RECOLECCION_FOLDER"], f"{folder_base}_{job_id[:6]}")
                 clean_dir = os.path.join(analysis_root, "limpias")
                 bb_dir = os.path.join(analysis_root, "con_bounding_box")
                 os.makedirs(clean_dir, exist_ok=True)
@@ -202,20 +209,20 @@ def _process_image_and_persist(job_id: str, path: str):
         scale = min(1280 / w, 720 / h)
         image = cv2.resize(image, (int(w * scale), int(h * scale)))
 
-    params = _deps["get_model_params"]()
+    params = _get_dep("get_model_params")()
     t0 = time.time()
-    results = _deps["yolo_model"](
+    results = _get_dep("yolo_model")(
         image,
-        device=_deps["YOLO_CONFIG"]["device"],
-        conf=float(params.get("confidence_threshold", _deps["YOLO_CONFIG"]["confidence"])),
+        device=_get_dep("YOLO_CONFIG")["device"],
+        conf=float(params.get("confidence_threshold", _get_dep("YOLO_CONFIG")["confidence"])),
         iou=float(params.get("iou_threshold", 0.45)),
-        verbose=_deps["YOLO_CONFIG"]["verbose"],
+        verbose=_get_dep("YOLO_CONFIG")["verbose"],
     )
     inference_ms = float((time.time() - t0) * 1000.0)
     image, detection_list = draw_detections(image, results)
 
     out_name = f"result_{job_id}.jpg"
-    out_path = os.path.join(_deps["app"].config["RESULTS_FOLDER"], out_name)
+    out_path = os.path.join(_get_dep("app").config["RESULTS_FOLDER"], out_name)
     cv2.imwrite(out_path, image)
 
     avg_conf = float(np.mean([d["confidence"] for d in detection_list])) if detection_list else 0.0
@@ -223,9 +230,9 @@ def _process_image_and_persist(job_id: str, path: str):
     # Telemetría (persistencia en detections_v2/inference_frames)
     try:
         h, w = image.shape[:2]
-        with _deps["state_lock"]:
-            cam_mode = str(_deps["get_camera_source_mode"]())
-        _deps["metrics_writer"].enqueue(
+        with _get_dep("state_lock"):
+            cam_mode = str(_get_dep("get_camera_source_mode")())
+        _get_dep("metrics_writer").enqueue(
             FrameRecord(
                 timestamp_iso=datetime.now().isoformat(),
                 source="upload_image",
@@ -282,9 +289,9 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
     if not cap.isOpened():
         raise RuntimeError("No se pudo leer el video")
 
-    fps = cap.get(cv2.CAP_PROP_FPS) or _deps["VIDEO_CONFIG"]["fps"]
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or _deps["VIDEO_CONFIG"]["width"]
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or _deps["VIDEO_CONFIG"]["height"]
+    fps = cap.get(cv2.CAP_PROP_FPS) or _get_dep("VIDEO_CONFIG")["fps"]
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or _get_dep("VIDEO_CONFIG")["width"]
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or _get_dep("VIDEO_CONFIG")["height"]
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
 
     if width > 1280 or height > 720:
@@ -293,9 +300,9 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
         height = int(height * scale)
 
     raw_name = f"result_{job_id}_raw.mp4"
-    raw_path = os.path.join(_deps["app"].config["RESULTS_FOLDER"], raw_name)
+    raw_path = os.path.join(_get_dep("app").config["RESULTS_FOLDER"], raw_name)
     browser_name = f"result_{job_id}_browser.mp4"
-    browser_path = os.path.join(_deps["app"].config["RESULTS_FOLDER"], browser_name)
+    browser_path = os.path.join(_get_dep("app").config["RESULTS_FOLDER"], browser_name)
 
     out, wrote_to, used = create_video_writer(raw_path, fps, width, height)
     print("[VIDEO_WRITER]", f"raw_path={wrote_to}")
@@ -330,13 +337,13 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
             # Dataset limpio: copiar el frame ANTES de dibujar bounding boxes / labels.
             clean_frame = frame.copy()
 
-            params = _deps["get_model_params"]()
-            results = _deps["yolo_model"](
+            params = _get_dep("get_model_params")()
+            results = _get_dep("yolo_model")(
                 frame,
-                device=_deps["YOLO_CONFIG"]["device"],
-                conf=float(params.get("confidence_threshold", _deps["YOLO_CONFIG"]["confidence"])),
+                device=_get_dep("YOLO_CONFIG")["device"],
+                conf=float(params.get("confidence_threshold", _get_dep("YOLO_CONFIG")["confidence"])),
                 iou=float(params.get("iou_threshold", 0.45)),
-                verbose=_deps["YOLO_CONFIG"]["verbose"],
+                verbose=_get_dep("YOLO_CONFIG")["verbose"],
             )
             frame, detection_list = draw_detections(frame, results)
 
@@ -345,8 +352,8 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
                 total_conf += float(np.mean([d["confidence"] for d in detection_list]))
                 best_conf = float(max(d["confidence"] for d in detection_list))
                 bb_frame = frame
-                ok_clean, clean_buf = cv2.imencode(".jpg", clean_frame, [cv2.IMWRITE_JPEG_QUALITY, _deps["VIDEO_CONFIG"]["jpeg_quality"]])
-                ok_bb, bb_buf = cv2.imencode(".jpg", bb_frame, [cv2.IMWRITE_JPEG_QUALITY, _deps["VIDEO_CONFIG"]["jpeg_quality"]])
+                ok_clean, clean_buf = cv2.imencode(".jpg", clean_frame, [cv2.IMWRITE_JPEG_QUALITY, _get_dep("VIDEO_CONFIG")["jpeg_quality"]])
+                ok_bb, bb_buf = cv2.imencode(".jpg", bb_frame, [cv2.IMWRITE_JPEG_QUALITY, _get_dep("VIDEO_CONFIG")["jpeg_quality"]])
                 if ok_clean and ok_bb:
                     frame_no = frame_count + 1
                     item = (best_conf, int(frame_no), clean_buf.tobytes(), bb_buf.tobytes())
@@ -365,7 +372,7 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
             if total_frames > 0 and frame_count % 3 == 0:
                 _set_job_progress(job_id, int((frame_count / total_frames) * 100), status="processing")
             elif total_frames <= 0 and frame_count % 15 == 0:
-                approx = min(95, 5 + int(frame_count / max(1, int(_deps["VIDEO_CONFIG"].get("fps", 30)))))
+                approx = min(95, 5 + int(frame_count / max(1, int(_get_dep("VIDEO_CONFIG").get("fps", 30)))))
                 _set_job_progress(job_id, approx, status="processing")
     finally:
         try:
@@ -442,9 +449,9 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
         stem = os.path.splitext(original_filename or "")[0].strip() or "video"
         ts_folder = datetime.now().strftime("%Y%m%d_%H%M")
         folder_base = f"{stem}_{ts_folder}"
-        analysis_root = os.path.join(_deps["app"].config["DATASET_RECOLECCION_FOLDER"], folder_base)
+        analysis_root = os.path.join(_get_dep("app").config["DATASET_RECOLECCION_FOLDER"], folder_base)
         if os.path.exists(analysis_root):
-            analysis_root = os.path.join(_deps["app"].config["DATASET_RECOLECCION_FOLDER"], f"{folder_base}_{job_id[:6]}")
+            analysis_root = os.path.join(_get_dep("app").config["DATASET_RECOLECCION_FOLDER"], f"{folder_base}_{job_id[:6]}")
         clean_dir = os.path.join(analysis_root, "limpias")
         bb_dir = os.path.join(analysis_root, "con_bounding_box")
         os.makedirs(clean_dir, exist_ok=True)
@@ -457,14 +464,14 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
             "success": True,
             "result_type": "video",
             # Compat legacy:
-            "result_url": (("/" + os.path.relpath(final_video_path, _deps["app"].root_path).replace("\\", "/")) if final_video_path else None),
+            "result_url": (("/" + os.path.relpath(final_video_path, _get_dep("app").root_path).replace("\\", "/")) if final_video_path else None),
             # Nuevo contrato (UI puede decidir si renderiza <video> o solo descarga)
-            "result_video_url": (("/" + os.path.relpath(final_video_path, _deps["app"].root_path).replace("\\", "/")) if final_video_path else None),
-            "result_video_path": (os.path.relpath(final_video_path, _deps["app"].root_path).replace("\\", "/") if final_video_path else None),
+            "result_video_url": (("/" + os.path.relpath(final_video_path, _get_dep("app").root_path).replace("\\", "/")) if final_video_path else None),
+            "result_video_path": (os.path.relpath(final_video_path, _get_dep("app").root_path).replace("\\", "/") if final_video_path else None),
             "result_video_mime": final_mime,
             "result_video_playable": bool(final_playable),
-            "result_video_raw_url": (("/" + os.path.relpath(result_video_path, _deps["app"].root_path).replace("\\", "/")) if result_video_path else None),
-            "result_video_browser_url": (("/" + os.path.relpath(browser_path, _deps["app"].root_path).replace("\\", "/")) if os.path.exists(browser_path) else None),
+            "result_video_raw_url": (("/" + os.path.relpath(result_video_path, _get_dep("app").root_path).replace("\\", "/")) if result_video_path else None),
+            "result_video_browser_url": (("/" + os.path.relpath(browser_path, _get_dep("app").root_path).replace("\\", "/")) if os.path.exists(browser_path) else None),
             "video_output_warning": video_output_warning,
             "top_detections": top_detections,
             "frames_processed": frame_count,

@@ -11,6 +11,13 @@ _deps: dict[str, Any] = {}
 _routes_initialized = False
 
 
+def _get_dep(key: str):
+    try:
+        return _deps[key]
+    except KeyError as exc:
+        raise RuntimeError(f"Dependencia faltante en automation: {key}") from exc
+
+
 def init_automation_routes(**deps: Any) -> None:
     """
     Inicializa dependencias y registra rutas de automatización (tracking/inspección).
@@ -24,17 +31,17 @@ def init_automation_routes(**deps: Any) -> None:
         return
     _routes_initialized = True
 
-    role_required = _deps["role_required"]
-    state_lock = _deps["state_lock"]
-    ptz_worker = _deps["ptz_worker"]
+    role_required = _get_dep("role_required")
+    state_lock = _get_dep("state_lock")
+    ptz_worker = _get_dep("ptz_worker")
 
-    is_ptz_ready_for_automation: Callable[[], bool] = _deps["is_ptz_ready_for_automation"]
+    is_ptz_ready_for_automation: Callable[[], bool] = _get_dep("is_ptz_ready_for_automation")
 
-    get_auto_tracking_enabled: Callable[[], bool] = _deps["get_auto_tracking_enabled"]
-    set_auto_tracking_enabled: Callable[[bool], None] = _deps["set_auto_tracking_enabled"]
+    get_auto_tracking_enabled: Callable[[], bool] = _get_dep("get_auto_tracking_enabled")
+    set_auto_tracking_enabled: Callable[[bool], None] = _get_dep("set_auto_tracking_enabled")
 
-    get_inspection_mode_enabled: Callable[[], bool] = _deps["get_inspection_mode_enabled"]
-    set_inspection_mode_enabled: Callable[[bool], None] = _deps["set_inspection_mode_enabled"]
+    get_inspection_mode_enabled: Callable[[], bool] = _get_dep("get_inspection_mode_enabled")
+    set_inspection_mode_enabled: Callable[[bool], None] = _get_dep("set_inspection_mode_enabled")
 
     @automation_bp.route("/api/auto_tracking", methods=["GET", "POST"])
     @login_required
@@ -94,4 +101,3 @@ def init_automation_routes(**deps: Any) -> None:
 
         with state_lock:
             return jsonify({"enabled": bool(get_inspection_mode_enabled())})
-

@@ -11,6 +11,13 @@ _deps: dict[str, Any] = {}
 _routes_initialized = False
 
 
+def _get_dep(key: str):
+    try:
+        return _deps[key]
+    except KeyError as exc:
+        raise RuntimeError(f"Dependencia faltante en dashboard: {key}") from exc
+
+
 def init_dashboard_routes(**deps: Any) -> None:
     """
     Inicializa dependencias y registra rutas del dashboard operador en el Blueprint.
@@ -24,16 +31,16 @@ def init_dashboard_routes(**deps: Any) -> None:
         return
     _routes_initialized = True
 
-    role_required = _deps["role_required"]
-    state_lock = _deps["state_lock"]
-    current_detection_state = _deps["current_detection_state"]
+    role_required = _get_dep("role_required")
+    state_lock = _get_dep("state_lock")
+    current_detection_state = _get_dep("current_detection_state")
 
-    get_live_processor: Callable[[], Any] = _deps["get_live_processor"]
-    get_live_reader: Callable[[], Any] = _deps["get_live_reader"]
+    get_live_processor: Callable[[], Any] = _get_dep("get_live_processor")
+    get_live_reader: Callable[[], Any] = _get_dep("get_live_reader")
 
-    get_or_create_camera_config = _deps["get_or_create_camera_config"]
-    leer_config_camara = _deps["leer_config_camara"]
-    get_configured_camera_type = _deps["get_configured_camera_type"]
+    get_or_create_camera_config = _get_dep("get_or_create_camera_config")
+    leer_config_camara = _get_dep("leer_config_camara")
+    get_configured_camera_type = _get_dep("get_configured_camera_type")
 
     @dashboard_bp.route("/", endpoint="index")
     @login_required
@@ -104,4 +111,3 @@ def init_dashboard_routes(**deps: Any) -> None:
             ),
             200,
         )
-

@@ -12,6 +12,13 @@ _deps: dict[str, Any] = {}
 _routes_initialized = False
 
 
+def _get_dep(key: str):
+    try:
+        return _deps[key]
+    except KeyError as exc:
+        raise RuntimeError(f"Dependencia faltante en auth: {key}") from exc
+
+
 def init_auth_routes(**deps: Any) -> None:
     """
     Inicializa dependencias y registra rutas de autenticación en el Blueprint.
@@ -25,8 +32,8 @@ def init_auth_routes(**deps: Any) -> None:
         return
     _routes_initialized = True
 
-    User = _deps["User"]
-    FLASK_CONFIG = _deps["FLASK_CONFIG"]
+    User = _get_dep("User")
+    FLASK_CONFIG = _get_dep("FLASK_CONFIG")
 
     @auth_bp.route("/login", methods=["GET", "POST"])
     def login():

@@ -16,6 +16,13 @@ _deps: dict[str, Any] = {}
 _routes_initialized = False
 
 
+def _get_dep(key: str):
+    try:
+        return _deps[key]
+    except KeyError as exc:
+        raise RuntimeError(f"Dependencia faltante en admin_camera: {key}") from exc
+
+
 def init_admin_camera_routes(**deps: Any) -> None:
     """
     Inicializa dependencias y registra rutas admin de cámara en el Blueprint.
@@ -29,15 +36,15 @@ def init_admin_camera_routes(**deps: Any) -> None:
         return
     _routes_initialized = True
 
-    role_required = _deps["role_required"]
+    role_required = _get_dep("role_required")
 
-    db = _deps["db"]
-    get_or_create_camera_config = _deps["get_or_create_camera_config"]
-    guardar_config_camara = _deps["guardar_config_camara"]
-    normalized_onvif_port: Callable[[int | None], int] = _deps["normalized_onvif_port"]
-    PTZController = _deps["PTZController"]
-    probe_onvif_ptz_capability = _deps["probe_onvif_ptz_capability"]
-    get_model_params = _deps["get_model_params"]
+    db = _get_dep("db")
+    get_or_create_camera_config = _get_dep("get_or_create_camera_config")
+    guardar_config_camara = _get_dep("guardar_config_camara")
+    normalized_onvif_port: Callable[[int | None], int] = _get_dep("normalized_onvif_port")
+    PTZController = _get_dep("PTZController")
+    probe_onvif_ptz_capability = _get_dep("probe_onvif_ptz_capability")
+    get_model_params = _get_dep("get_model_params")
 
     def _humanize_onvif_error(err: Exception) -> str:
         msg = (str(err) or err.__class__.__name__).strip()
