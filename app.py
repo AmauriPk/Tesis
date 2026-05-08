@@ -45,7 +45,6 @@ except Exception:  # pragma: no cover
 from config import FLASK_CONFIG, ONVIF_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG, _env_float, _env_int
 from src.system_core import CameraConfig, FrameRecord, MetricsDBWriter, PTZController, User, db
 from src.video_processor import LiveStreamDeps, LiveVideoProcessor, RTSPLatestFrameReader
-from src.system_core import select_priority_detection
 from src.services.camera_state_service import (
     init_camera_state_service,
     guardar_config_camara,
@@ -483,131 +482,11 @@ init_model_params_routes(
 )
 app.register_blueprint(model_params_bp)
 
-def _bbox_offset_norm(frame_w: int, frame_h: int, bbox_xyxy) -> tuple[float, float]:
-    """
-    Calcula el error normalizado del centro del bbox respecto al centro del frame.
-
-    Returns:
-        (dx, dy): valores normalizados en rango aproximado [-1, 1].
-            - dx > 0: bbox a la derecha
-            - dy > 0: bbox abajo (convención de imagen)
-    """
-    try:
-        x1, y1, x2, y2 = bbox_xyxy
-    except Exception:
-        return 0.0, 0.0
-    cx = (x1 + x2) / 2.0
-    cy = (y1 + y2) / 2.0
-    center_x = frame_w / 2.0
-    center_y = frame_h / 2.0
-
-    dx = (cx - center_x) / max(1.0, (frame_w / 2.0))  # -1..1
-    dy = (cy - center_y) / max(1.0, (frame_h / 2.0))  # -1..1 (positivo hacia abajo)
-    return float(dx), float(dy)
-
-def _ptz_centering_vector(
-    frame_w: int,
-    frame_h: int,
-    bbox_xyxy,
-    *,
-    tolerance_frac: float = 0.20,
-    max_speed: float = 0.60,
-) -> tuple[float, float]:
-    """
-    Calcula velocidades (pan, tilt) para centrar un bounding box (bbox) en el frame.
-
-    Regla:
-    - Zona Central (tolerancia): si el centro del bbox cae dentro de una caja
-      central de tamaÃ±o `tolerance_frac` del frame, la velocidad es 0 (anti-jitter).
-    - Fuera: velocidad proporcional al error, escalada suavemente hasta `max_speed`.
-
-    Convenciones:
-    - `pan > 0` => mover a la derecha.
-    - En imagen `y` crece hacia abajo; en ONVIF, `tilt > 0` suele representar arriba,
-      por eso se invierte el signo del eje Y.
-
-    Args:
-        frame_w: Ancho del frame en pixeles.
-        frame_h: Alto del frame en pixeles.
-        bbox_xyxy: Bounding box en formato `(x1, y1, x2, y2)` en pixeles.
-        tolerance_frac: Fraccion del frame (0..1) usada como tolerancia central.
-        max_speed: Velocidad maxima absoluta por eje.
-
-    Returns:
-        Tupla `(pan, tilt)` con valores en `[-max_speed, max_speed]`.
-    """
-    fw = max(1, int(frame_w))
-    fh = max(1, int(frame_h))
-    try:
-        x1, y1, x2, y2 = bbox_xyxy
-    except Exception:
-        return 0.0, 0.0
-    cx = (float(x1) + float(x2)) / 2.0
-    cy = (float(y1) + float(y2)) / 2.0
-    fx = float(fw) / 2.0
-    fy = float(fh) / 2.0
-
-    err_x_px = float(cx - fx)
-    err_y_px = float(cy - fy)
-
-    # Normaliza error a [-1..1] (normalizado)
-    err_x = err_x_px / max(1.0, float(fw) / 2.0)
-    err_y = err_y_px / max(1.0, float(fh) / 2.0)
-
-    # Zona central: tolerance_frac es el tamaÃ±o de la caja respecto al frame.
-    tol = _clamp(float(tolerance_frac), 0.01, 0.90)
-    tol_half_x = (tol / 2.0)
-    tol_half_y = (tol / 2.0)
-
-    # Control proporcional progresivo por eje:
-    # - `deadzone` vive en el mismo espacio normalizado [-1..1].
-    # - La velocidad crece progresivamente al alejarse del centro.
-    pan = _p_control_speed(err_x, deadzone=tol_half_x, max_speed=float(max_speed), k=1.0)
-
-    # Inversion del eje Y: en imagen err_y>0 es "abajo", pero en ONVIF tilt>0 suele ser "arriba".
-    tilt = -1.0 * _p_control_speed(err_y, deadzone=tol_half_y, max_speed=float(max_speed), k=1.0)
-    return float(pan), float(tilt)
-
 def _clamp(v: float, lo: float, hi: float) -> float:
     """Limita un valor float al rango [lo, hi]."""
     return float(max(lo, min(hi, v)))
 
-def _p_control_speed(error: float, *, deadzone: float, max_speed: float, k: float = 1.0) -> float:
-    """
-    Control proporcional (P) con zona muerta:
-    - Dentro de `deadzone` => 0 (evita jitter).
-    - Fuera => velocidad proporcional a la distancia, suavizando hacia 0 al acercarse al centro.
-
-    Args:
-        error: Error normalizado del eje (tipicamente en [-1..1]).
-        deadzone: Umbral (0..1) en el que se considera centrado y retorna 0.
-        max_speed: Velocidad maxima absoluta a entregar.
-        k: Ganancia proporcional.
-
-    Returns:
-        Velocidad con signo en el rango [-max_speed, max_speed].
-    """
-    e = float(error)
-    a = abs(e)
-    if a <= deadzone:
-        return 0.0
-    # Normaliza distancia fuera de la zona muerta a [0..1].
-    # - Cuando |error| == deadzone => scaled == 0 (velocidad 0)
-    # - Cuando |error| == 1 => scaled == 1 (velocidad max)
-    scaled = (a - deadzone) / max(1e-6, (1.0 - deadzone))
-    v = _clamp(float(k) * float(max_speed) * scaled, 0.0, float(max_speed))
-    return v if e > 0 else -v
-
 ## Worker de patrullaje movido a `src/services/inspection_patrol_service.py`
-def _select_priority_detection(detection_list: list[dict]) -> dict | None:
-    """
-    Regla de priorización (Enjambre):
-    Si hay múltiples detecciones, el tracking PTZ debe centrarse en el bbox MÁS GRANDE.
-    """
-    if not detection_list:
-        return None
-    # Regla pura (sin efectos secundarios) para poder testearla fuera de Flask.
-    return select_priority_detection(detection_list)
 
 def _set_ptz_capable(value: bool, *, error: str | None = None) -> None:
     """
@@ -732,14 +611,6 @@ init_admin_camera_routes(
 app.register_blueprint(admin_camera_bp)
 
 # ======================== PTZ READYNESS HELPERS ========================
-def _require_ptz_capable() -> None:
-    """Bloquea rutas PTZ cuando el Auto-Discovery determina cámara fija."""
-    with state_lock:
-        ok = bool(is_ptz_capable)
-    if not ok:
-        abort(403)
-
-
 def _ptz_discovered_capable() -> bool:
     with state_lock:
         return bool(is_ptz_capable)
