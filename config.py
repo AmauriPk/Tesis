@@ -61,29 +61,6 @@ STORAGE_CONFIG = {
     "dataset_recoleccion_folder": os.environ.get("DATASET_RECOLECCION_FOLDER", "dataset_recoleccion"),
 }
 
-# ======================== CONFIGURACIÃ“N DE PERSISTENCIA / TELEMETRÃA ========================
-PERSISTENCE_CONFIG = {
-    "enabled": _env_bool("METRICS_LOGGING", True),
-    "queue_max": _env_int("METRICS_QUEUE_MAX", 5000),
-    "detection_persistence_frames": _env_int("DETECTION_PERSISTENCE_FRAMES", 3),
-}
-
-# ======================== CONFIGURACIÃ“N DE PTZ / ONVIF ========================
-PTZ_CONFIG = {
-    "sweep_duration_s": _env_float("PTZ_SWEEP_DURATION_S", 14.0),
-    "sweep_speed": _env_float("PTZ_SWEEP_SPEED", 0.08),
-    "idle_s": _env_float("PTZ_IDLE_S", 10.0),
-    "tolerance_frac": _env_float("PTZ_TOLERANCE_FRAC", 0.20),
-    "max_speed": _env_float("PTZ_MAX_SPEED", 0.60),
-}
-
-# ======================== MODELO DE VISIÃ“N - PARÃMETROS ========================
-VISION_MODEL_PARAMS = {
-    "confidence_threshold": _env_float("CONFIDENCE_THRESHOLD", 0.60),
-    "iou_threshold": _env_float("IOU_THRESHOLD", 0.45),
-    "persistence_frames": max(1, _env_int("PERSISTENCE_FRAMES", 3)),
-}
-
 # ======================== RUTAS DEL PROYECTO ========================
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 DATASET_TRAINING_ROOT = os.environ.get("DATASET_TRAINING_ROOT", os.path.join(PROJECT_ROOT, "dataset_entrenamiento"))
@@ -105,13 +82,10 @@ for _dir in [DATASET_NEGATIVE_DIR, DATASET_POSITIVE_PENDING_DIR, DATASET_LIMPIAS
 __all__ = [
     "FLASK_CONFIG",
     "ONVIF_CONFIG",
-    "PERSISTENCE_CONFIG",
     "PROJECT_ROOT",
-    "PTZ_CONFIG",
     "RTSP_CONFIG",
     "STORAGE_CONFIG",
     "VIDEO_CONFIG",
-    "VISION_MODEL_PARAMS",
     "YOLO_CONFIG",
     "DATASET_TRAINING_ROOT",
     "DATASET_NEGATIVE_DIR",
