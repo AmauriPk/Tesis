@@ -69,7 +69,12 @@ from src.routes.automation import automation_bp, init_automation_routes
 
 # ======================== APP / DB ========================
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
+_secret_env = (os.environ.get("FLASK_SECRET_KEY") or "").strip()
+if not _secret_env:
+    # Fallback solo para desarrollo / demo local. En entornos reales configurar FLASK_SECRET_KEY.
+    print("[SECURITY][WARN] FLASK_SECRET_KEY no configurada; usando clave de desarrollo.")
+    _secret_env = "dev-secret-change-me"
+app.secret_key = _secret_env
 
 init_camera_state_service(root_path=app.root_path)
 
@@ -233,9 +238,25 @@ def bootstrap_users() -> None:
         return
 
     admin = User(username="admin", role="admin")
-    admin.set_password(os.environ.get("DEFAULT_ADMIN_PASSWORD", "admin123"))
+    admin_pw_env = (os.environ.get("DEFAULT_ADMIN_PASSWORD") or "").strip()
+    admin_pw = admin_pw_env or "admin123"
+    if not admin_pw_env or admin_pw == "admin123":
+        print(
+            "[SECURITY][WARN] Usando password por defecto para admin. "
+            "Configura DEFAULT_ADMIN_PASSWORD. "
+            f"password_configurada={bool(admin_pw_env)} password_len={len(admin_pw)}"
+        )
+    admin.set_password(admin_pw)
     operator = User(username="operador", role="operator")
-    operator.set_password(os.environ.get("DEFAULT_OPERATOR_PASSWORD", "operador123"))
+    operator_pw_env = (os.environ.get("DEFAULT_OPERATOR_PASSWORD") or "").strip()
+    operator_pw = operator_pw_env or "operador123"
+    if not operator_pw_env or operator_pw == "operador123":
+        print(
+            "[SECURITY][WARN] Usando password por defecto para operador. "
+            "Configura DEFAULT_OPERATOR_PASSWORD. "
+            f"password_configurada={bool(operator_pw_env)} password_len={len(operator_pw)}"
+        )
+    operator.set_password(operator_pw)
 
     db.session.add(admin)
     db.session.add(operator)
