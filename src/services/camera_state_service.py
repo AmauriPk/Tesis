@@ -97,9 +97,8 @@ def set_configured_camera_type(camera_type: str) -> str:
     # Persistir en disco (lo que realmente usan threads/UI).
     try:
         guardar_config_camara(ct == "ptz")
-    except Exception:
-        # Fail-safe: no tumbar la app por persistencia.
-        pass
+    except Exception as e:
+        print(f"[CAMERA_CFG][WARN] guardar_config failed: {e}")
     return ct
 
 

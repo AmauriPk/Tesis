@@ -12,32 +12,21 @@ Reglas INTRANSFERIBLES (NO eliminar; solo optimizar/refactorizar):
 5) Regla de priorización (Enjambre): el tracking PTZ se centra en el bounding box MÁS GRANDE.
 6) Mitigación de aves: persistencia de frames antes de confirmar una detección.
 """
-import base64
-import heapq
-import json
 import os
 import queue
-import secrets
-import shutil
 import sqlite3
 import threading
 import time
 from datetime import datetime
 from functools import wraps
-from urllib.parse import urlparse
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
-import cv2
-import numpy as np
 from flask import (
     Flask,
-    Response,
     abort,
     flash,
     jsonify,
     send_file,
     redirect,
-    render_template,
     request,
     session,
     url_for,
@@ -46,38 +35,23 @@ from flask_login import (
     LoginManager,
     current_user,
     login_required,
-    login_user,
-    logout_user,
 )
 from ultralytics import YOLO
-from werkzeug.utils import secure_filename
 
 try:
     import torch
 except Exception:  # pragma: no cover
     torch = None
 
-try:
-    import ffmpeg  # type: ignore
-except Exception:  # pragma: no cover
-    ffmpeg = None
-
 from config import FLASK_CONFIG, ONVIF_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG, _env_float, _env_int
 from src.system_core import CameraConfig, FrameRecord, MetricsDBWriter, PTZController, User, db
-from src.video_processor import LiveStreamDeps, LiveVideoProcessor, RTSPLatestFrameReader, draw_detections
-from src.system_core import clamp, select_priority_detection
-from src.services.video_export_service import (
-    create_video_writer,
-    make_browser_compatible_mp4,
-    resolve_ffmpeg_bin,
-    is_valid_video_file,
-)
+from src.video_processor import LiveStreamDeps, LiveVideoProcessor, RTSPLatestFrameReader
+from src.system_core import select_priority_detection
 from src.services.camera_state_service import (
     init_camera_state_service,
     guardar_config_camara,
     leer_config_camara,
     get_configured_camera_type,
-    set_configured_camera_type,
     is_camera_configured_ptz,
 )
 from src.services.ptz_state_service import PTZStateService
@@ -385,8 +359,8 @@ class DetectionEventWriter:
         try:
             con.execute("PRAGMA journal_mode=WAL;")
             con.execute("PRAGMA synchronous=NORMAL;")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[EVENT_DB][WARN] pragma err={e}")
         _ensure_detection_events_schema(con)
         return con
 
@@ -491,15 +465,15 @@ class DetectionEventWriter:
                 if bb and len(bb) == 4:
                     x1, y1, x2, y2 = [int(v) for v in bb]
                     self._active_best_bbox_text = f"{x1},{y1},{x2},{y2}"
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[EVENT][WARN] bbox_parse err={e}")
             # Best evidence path (si existe)
             try:
                 p = frame_best_det.get("image_path") if isinstance(frame_best_det, dict) else None
                 if p:
                     self._active_best_evidence_path = str(p).replace("\\", "/")
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[EVENT][WARN] evidence_path err={e}")
 
         now_iso = datetime.now().isoformat()
         try:
@@ -1674,8 +1648,8 @@ with app.app_context():
     cfg = get_or_create_camera_config()
     try:
         guardar_config_camara((cfg.camera_type or "fixed").strip().lower() == "ptz")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[INIT][WARN] guardar_config_camara failed: {e}")
     bootstrap_users()
     _probe_onvif_ptz_capability()
 

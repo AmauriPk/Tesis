@@ -77,8 +77,8 @@ class PTZStateService:
                         "[TRACKING_TARGET]",
                         f"bbox={tuple(bbox)} conf={float(payload.get('confidence') or 0.0):.3f} updated=True",
                     )
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[PTZ_STATE][WARN] update_tracking_target err={e}")
 
     def get_tracking_target_snapshot(self) -> dict:
         with self.tracking_target_lock:

@@ -676,8 +676,8 @@ class LiveVideoProcessor:
             if detection_list and confirmed:
                 try:
                     self._save_evidence(frame, detection_list)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[EVIDENCE][ERROR] save failed: {e}")
             else:
                 self._evidence_saved_for_active_detection = False
                 self._best_evidence_conf_for_active_detection = 0.0
@@ -700,8 +700,8 @@ class LiveVideoProcessor:
                         camera_mode=str(self.get_camera_mode()),
                     )
                     self.metrics_enqueue(record)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[METRICS][WARN] enqueue failed: {e}")
 
             # Tracking PTZ: solo publicamos el objetivo para un worker externo (app.py).
             try:
@@ -723,8 +723,8 @@ class LiveVideoProcessor:
                                 "updated_at": float(time.time()),
                             }
                         )
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[TRACKING][WARN] update_target failed: {e}")
 
             self._update_ui_state(confirmed=confirmed, consecutive_hits=consecutive_hits, detection_list=detection_list)
 

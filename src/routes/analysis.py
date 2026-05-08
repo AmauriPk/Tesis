@@ -15,7 +15,7 @@ from flask import Blueprint, jsonify, request
 from flask_login import login_required
 from werkzeug.utils import secure_filename
 
-from src.services.video_export_service import create_video_writer, is_valid_video_file, make_browser_compatible_mp4
+from src.services.video_export_service import create_video_writer, make_browser_compatible_mp4
 from src.system_core import FrameRecord
 from src.video_processor import draw_detections
 
