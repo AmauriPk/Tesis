@@ -62,6 +62,7 @@ from src.services.inspection_patrol_service import _InspectionPatrolWorker
 from src.services.ptz_state_service import PTZStateService
 from src.services.ptz_worker_service import PTZCommandWorker
 from src.services.tracking_worker_service import TrackingPTZWorker
+from src.services.media_service import safe_join as _safe_join, safe_rel_path as _safe_rel_path
 from src.routes.analysis import analysis_bp, init_analysis_routes
 from src.routes.events import events_bp, init_events_routes
 from src.routes.dataset import dataset_bp, init_dataset_routes
@@ -71,6 +72,7 @@ from src.routes.dashboard import dashboard_bp, init_dashboard_routes
 from src.routes.model_params import model_params_bp, init_model_params_routes
 from src.routes.ptz_manual import ptz_manual_bp, init_ptz_manual_routes
 from src.routes.automation import automation_bp, init_automation_routes
+from src.routes.media import media_bp, init_media_routes
 
 # ======================== APP / DB ========================
 app = Flask(__name__)
@@ -893,26 +895,6 @@ def diag():
     )
 
 # ======================== UI ========================
-def _safe_rel_path(rel_path: str) -> str:
-    """
-    Normaliza un path relativo y bloquea traversal basico.
-
-    Args:
-        rel_path: Path relativo recibido desde request.
-
-    Returns:
-        Path relativo normalizado (separador `/` y sin prefijo `/`).
-
-    Raises:
-        ValueError: Si el path intenta traversal (contiene `..`).
-    """
-    rel = (rel_path or "").replace("\\", "/").lstrip("/")
-    # Bloquea traversal sencillo.
-    if ".." in rel.split("/"):
-        raise ValueError("invalid_path")
-    return rel
-
-
 def cleanup_old_evidence(*, dry_run: bool = True) -> dict:
     """
     Limpieza segura de evidencias para no saturar disco.
@@ -1016,27 +998,6 @@ def cleanup_old_evidence(*, dry_run: bool = True) -> dict:
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
-def _safe_join(base_dir: str, rel_path: str) -> str:
-    """
-    Hace join seguro `base_dir` + `rel_path` bloqueando path traversal.
-
-    Args:
-        base_dir: Directorio base permitido.
-        rel_path: Path relativo proporcionado por el usuario.
-
-    Returns:
-        Ruta absoluta dentro de `base_dir`.
-
-    Raises:
-        ValueError: Si el path resultante escapa de `base_dir`.
-    """
-    rel = _safe_rel_path(rel_path)
-    base = os.path.abspath(base_dir)
-    full = os.path.abspath(os.path.join(base, rel))
-    if not (full == base or full.startswith(base + os.sep)):
-        raise ValueError("invalid_path")
-    return full
-
 init_dataset_routes(
     role_required=role_required,
     safe_join=_safe_join,
@@ -1048,22 +1009,10 @@ init_dataset_routes(
 )
 app.register_blueprint(dataset_bp)
 
-@app.get("/media/<path:rel_path>")
-@login_required
-@role_required("operator", "admin")
-def media(rel_path: str):
-    """
-    Sirve evidencias/frames de manera segura.
-    Permite solo archivos dentro de `app.root_path` (bloquea traversal).
-    """
-    try:
-        rel = _safe_rel_path(rel_path)
-        full = _safe_join(os.path.abspath(app.root_path), rel)
-    except Exception:
-        abort(400)
-    if not os.path.exists(full) or not os.path.isfile(full):
-        abort(404)
-    return send_file(full)
+init_media_routes(
+    role_required=role_required,
+)
+app.register_blueprint(media_bp)
 
 # ======================== STREAM + STATUS ========================
 @app.get("/api/get_camera_status")
