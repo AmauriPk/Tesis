@@ -80,6 +80,7 @@ from src.routes.auth import auth_bp, init_auth_routes
 from src.routes.dashboard import dashboard_bp, init_dashboard_routes
 from src.routes.model_params import model_params_bp, init_model_params_routes
 from src.routes.ptz_manual import ptz_manual_bp, init_ptz_manual_routes
+from src.routes.automation import automation_bp, init_automation_routes
 
 # ======================== APP / DB ========================
 app = Flask(__name__)
@@ -901,8 +902,12 @@ _last_ptz_ready_manual: bool | None = None
 
 def set_auto_tracking_enabled(value: bool) -> None:
     global auto_tracking_enabled
-    with state_lock:
-        auto_tracking_enabled = bool(value)
+    auto_tracking_enabled = bool(value)
+
+
+def set_inspection_mode_enabled(value: bool) -> None:
+    global inspection_mode_enabled
+    inspection_mode_enabled = bool(value)
 
 # Tracking PTZ (separado del hilo de video)
 tracking_target_lock = threading.Lock()
@@ -2071,68 +2076,6 @@ def api_get_camera_status():
     is_ptz = bool(leer_config_camara())
     return jsonify({"status": "ok", "camera_type": ("ptz" if is_ptz else "fixed"), "configured_is_ptz": is_ptz}), 200
 
-@app.route("/api/auto_tracking", methods=["GET", "POST"])
-@login_required
-@role_required("operator")
-def api_auto_tracking():
-    """Lee o actualiza el flag de tracking automático (solo efectivo si el hardware es PTZ)."""
-    global auto_tracking_enabled
-    if request.method == "GET":
-        with state_lock:
-            return jsonify({"enabled": bool(auto_tracking_enabled)})
-
-    payload = {}
-    try:
-        payload = request.get_json(silent=True) or {}
-    except Exception:
-        payload = {}
-
-    enabled = payload.get("enabled", None)
-    if enabled is None:
-        enabled_txt = (request.form.get("enabled") or "").strip().lower()
-        enabled = enabled_txt in {"1", "true", "t", "yes", "y", "on"}
-
-    ready_auto = bool(is_ptz_ready_for_automation())
-    with state_lock:
-        auto_tracking_enabled = bool(enabled) and bool(ready_auto)
-        disabled = not bool(enabled)
-    if disabled:
-        ptz_worker.enqueue_stop()
-    with state_lock:
-        return jsonify({"enabled": bool(auto_tracking_enabled)})
-
-@app.route("/api/inspection_mode", methods=["GET", "POST"])
-@login_required
-@role_required("operator")
-def api_inspection_mode():
-    """Lee o actualiza el modo de inspección/patrullaje automático (solo efectivo si PTZ)."""
-    global inspection_mode_enabled
-
-    if request.method == "GET":
-        with state_lock:
-            return jsonify({"enabled": bool(inspection_mode_enabled)})
-
-    payload = request.get_json(silent=True) or {}
-    enabled = bool(payload.get("enabled"))
-
-    ready_auto = bool(is_ptz_ready_for_automation())
-    with state_lock:
-        if enabled:
-            inspection_mode_enabled = bool(enabled) and bool(ready_auto)
-            # Al habilitar inspección, garantizar que el tracking esté listo para intervenir.
-            # (Desacoplado) No tocar auto_tracking aquÃ­.
-        else:
-            inspection_mode_enabled = False
-            # (Desacoplado) No tocar auto_tracking aquÃ­.
-
-        disabled = not bool(enabled)
-
-    if disabled:
-        ptz_worker.enqueue_stop()
-
-    with state_lock:
-        return jsonify({"enabled": bool(inspection_mode_enabled)})
-
 def _require_ptz_capable() -> None:
     """Bloquea rutas PTZ cuando el Auto-Discovery determina cámara fija."""
     with state_lock:
@@ -2181,6 +2124,22 @@ def is_ptz_ready_for_automation() -> bool:
     ready = bool(configured_ptz or discovered)
     _log_ptz_ready(kind="automation", ready=ready, configured=configured_ptz, discovered=discovered)
     return bool(ready)
+
+init_automation_routes(
+    role_required=role_required,
+    state_lock=state_lock,
+    tracking_target_state=tracking_target_state,
+    tracking_target_lock=tracking_target_lock,
+    ptz_worker=ptz_worker,
+    is_camera_configured_ptz=is_camera_configured_ptz,
+    is_ptz_ready_for_automation=is_ptz_ready_for_automation,
+    get_auto_tracking_enabled=lambda: bool(auto_tracking_enabled),
+    set_auto_tracking_enabled=set_auto_tracking_enabled,
+    get_inspection_mode_enabled=lambda: bool(inspection_mode_enabled),
+    set_inspection_mode_enabled=set_inspection_mode_enabled,
+    current_detection_state=current_detection_state,
+)
+app.register_blueprint(automation_bp)
 
 
 init_ptz_manual_routes(
