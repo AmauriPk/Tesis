@@ -156,6 +156,38 @@ def _volatile_sessions():
         # Evitar loops / permitir login/logout/static.
         if endpoint in {"auth.login", "auth.logout", "static"}:
             return None
+        # Expiración por inactividad (idle timeout).
+        if current_user.is_authenticated:
+            try:
+                raw_timeout = (os.environ.get("SESSION_IDLE_TIMEOUT_SECONDS") or "900").strip()
+                idle_timeout_s = int(raw_timeout)
+            except Exception:
+                idle_timeout_s = 900
+            idle_timeout_s = max(60, min(86400, int(idle_timeout_s)))
+
+            now = time.time()
+            last_seen = session.get("last_seen_at")
+            if last_seen is not None:
+                try:
+                    age_s = now - float(last_seen)
+                except Exception:
+                    age_s = float(idle_timeout_s) + 1.0
+                if float(age_s) > float(idle_timeout_s):
+                    try:
+                        logout_user()
+                    except Exception:
+                        pass
+                    try:
+                        session.clear()
+                    except Exception:
+                        pass
+                    flash("La sesión expiró por inactividad.", "warning")
+                    return redirect(url_for("auth.login"))
+            # Actualizar último visto si no expiró.
+            try:
+                session["last_seen_at"] = float(now)
+            except Exception:
+                pass
         if current_user.is_authenticated and (session.get("boot_id") != SESSION_BOOT_ID):
             # Sesión de un arranque anterior: cerrar y forzar login.
             try:

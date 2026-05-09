@@ -153,6 +153,8 @@ def init_auth_routes(**deps: Any) -> None:
                 session.permanent = False
                 # Invalida sesiones previas al reiniciar servidor.
                 session["boot_id"] = str(SESSION_BOOT_ID)
+                # Expiración por inactividad.
+                session["last_seen_at"] = float(time.time())
                 next_url = (request.form.get("next") or request.args.get("next") or "").strip()
                 if next_url:
                     parsed = urlparse(next_url)
