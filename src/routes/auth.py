@@ -43,8 +43,13 @@ def init_auth_routes(**deps: Any) -> None:
             return redirect(url_for("dashboard.index"))
 
         if request.method == "POST":
-            username = (request.form.get("username") or "").strip()
+            raw_username = request.form.get("username") or ""
+            username = raw_username.strip()
             password = request.form.get("password") or ""
+            # Seguridad: no corregir silenciosamente whitespace en username.
+            if (raw_username != username) or (not username):
+                flash("Credenciales inválidas.", "danger")
+                return render_template("login.html", show_bootstrap_hint=bool(FLASK_CONFIG.get("debug")))
             user = User.query.filter_by(username=username).first()
             if user and user.check_password(password):
                 login_user(user)
