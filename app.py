@@ -14,6 +14,7 @@ Reglas INTRANSFERIBLES (NO eliminar; solo optimizar/refactorizar):
 """
 import os
 import sqlite3
+import secrets
 import threading
 import time
 from datetime import datetime
@@ -33,6 +34,7 @@ from flask import (
 from flask_login import (
     LoginManager,
     current_user,
+    logout_user,
     login_required,
 )
 from ultralytics import YOLO
@@ -83,6 +85,9 @@ if not _secret_env:
     print("[SECURITY][WARN] FLASK_SECRET_KEY no configurada; usando clave de desarrollo. No usar así en demo/producción.")
     _secret_env = "dev-secret-change-me"
 app.secret_key = _secret_env
+
+# Identificador volátil por arranque: invalida cookies/sesiones previas tras reinicio.
+SESSION_BOOT_ID = secrets.token_hex(16)
 
 init_camera_state_service(root_path=app.root_path)
 
@@ -146,6 +151,26 @@ login_manager.init_app(app)
 def _volatile_sessions():
     """Fuerza sesiones volátiles (no persistir al cerrar el navegador)."""
     session.permanent = False
+    try:
+        endpoint = (request.endpoint or "").strip()
+        # Evitar loops / permitir login/logout/static.
+        if endpoint in {"auth.login", "auth.logout", "static"}:
+            return None
+        if current_user.is_authenticated and (session.get("boot_id") != SESSION_BOOT_ID):
+            # Sesión de un arranque anterior: cerrar y forzar login.
+            try:
+                logout_user()
+            except Exception:
+                pass
+            try:
+                session.clear()
+            except Exception:
+                pass
+            flash("La sesión anterior fue cerrada porque el sistema se reinició.", "warning")
+            return redirect(url_for("auth.login"))
+    except Exception:
+        # Fail-safe: no bloquear requests si falla el check.
+        return None
 
 @login_manager.user_loader
 def load_user(user_id: str):
@@ -473,6 +498,7 @@ app.register_blueprint(events_bp)
 init_auth_routes(
     User=User,
     FLASK_CONFIG=FLASK_CONFIG,
+    SESSION_BOOT_ID=SESSION_BOOT_ID,
 )
 app.register_blueprint(auth_bp)
 

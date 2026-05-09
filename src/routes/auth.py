@@ -34,6 +34,7 @@ def init_auth_routes(**deps: Any) -> None:
 
     User = _get_dep("User")
     FLASK_CONFIG = _get_dep("FLASK_CONFIG")
+    SESSION_BOOT_ID = _get_dep("SESSION_BOOT_ID")
 
     @auth_bp.route("/login", methods=["GET", "POST"])
     def login():
@@ -48,6 +49,8 @@ def init_auth_routes(**deps: Any) -> None:
             if user and user.check_password(password):
                 login_user(user)
                 session.permanent = False
+                # Invalida sesiones previas al reiniciar servidor.
+                session["boot_id"] = str(SESSION_BOOT_ID)
                 next_url = (request.form.get("next") or request.args.get("next") or "").strip()
                 if next_url:
                     parsed = urlparse(next_url)

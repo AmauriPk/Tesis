@@ -176,7 +176,7 @@ def flask_app():
     )
     app.register_blueprint(dashboard_bp)
 
-    init_auth_routes(User=_UserModel, FLASK_CONFIG={"debug": True})
+    init_auth_routes(User=_UserModel, FLASK_CONFIG={"debug": True}, SESSION_BOOT_ID="test-boot-id")
     app.register_blueprint(auth_bp)
 
     init_events_routes(
