@@ -441,6 +441,65 @@ p, span, div, td, th, small, .small, li {
   text-shadow: 0 0 8px var(--amber-glow);
 }
 
+/* ── Panel de estado del sistema (operador) ─────────────────── */
+.system-status-panel .card-body {
+  padding: .85rem .9rem !important;
+}
+
+.system-status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .55rem .7rem;
+}
+
+.system-status-item {
+  padding: .55rem .6rem;
+  border: 1px solid var(--bd-mid);
+  background: rgba(0, 0, 0, .35);
+}
+
+.system-status-label {
+  color: var(--mut2) !important;
+  font-size: .66rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin-bottom: .15rem;
+}
+
+.system-status-value {
+  font-family: var(--ff-mono) !important;
+  font-size: .78rem;
+  letter-spacing: .04em;
+}
+
+.system-status-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid var(--bd);
+  padding-top: .55rem;
+}
+
+.status-ok {
+  color: var(--neon) !important;
+  text-shadow: 0 0 8px var(--neon-glow);
+}
+
+.status-warn {
+  color: var(--amber) !important;
+  text-shadow: 0 0 8px var(--amber-glow);
+}
+
+.status-danger {
+  color: var(--bad) !important;
+  text-shadow: 0 0 10px var(--bad-glow);
+}
+
+.status-muted {
+  color: var(--mut2) !important;
+  text-shadow: none !important;
+}
+
 /* ── Formularios ────────────────────────────────────────────── */
 .form-control,
 .form-select {

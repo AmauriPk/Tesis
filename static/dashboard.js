@@ -2,6 +2,13 @@
   const byId = (id) => document.getElementById(id);
   let lastPtzWarning = "";
 
+  const sysState = {
+    camera: null, // /api/camera_status
+    detection: null, // /detection_status
+    autoTracking: null, // /api/auto_tracking
+    inspection: null, // /api/inspection_mode
+  };
+
   const fetchJson = async (url, opts = {}) => {
     const res = await fetch(url, {
       credentials: "same-origin",
@@ -15,6 +22,54 @@
   const setText = (id, text) => {
     const el = byId(id);
     if (el) el.textContent = text;
+  };
+
+  const setStatus = (id, text, cls) => {
+    const el = byId(id);
+    if (!el) return;
+    el.textContent = String(text ?? "—");
+    el.classList.remove("status-ok", "status-warn", "status-danger", "status-muted");
+    el.classList.add(cls || "status-muted");
+  };
+
+  const renderSystemPanel = () => {
+    const cam = sysState.camera || {};
+    const det = sysState.detection || {};
+    const autoT = sysState.autoTracking || {};
+    const insp = sysState.inspection || {};
+
+    const camType = String(cam.camera_type || "—");
+    const configuredPtz = Boolean(cam.configured_is_ptz);
+    const rtsp = cam.rtsp || {};
+    const stale = Boolean(rtsp.stale_over_5s);
+    const hasRtspErr = Boolean(rtsp.error);
+
+    const camConnText = hasRtspErr ? "No disponible" : stale ? "Sin señal" : "Conectada";
+    const camConnCls = hasRtspErr ? "status-warn" : stale ? "status-danger" : "status-ok";
+    setStatus("sysCamConn", camConnText, camConnCls);
+
+    const camTypeText = camType === "ptz" ? "PTZ" : camType === "fixed" ? "Fija" : camType;
+    setStatus("sysCamType", camTypeText, camType ? "status-ok" : "status-muted");
+
+    const ptzReady = configuredPtz;
+    setStatus("sysPtzReady", ptzReady ? "Listo" : "No listo", ptzReady ? "status-ok" : "status-muted");
+
+    const atEnabled = Boolean(autoT.enabled);
+    setStatus("sysTracking", atEnabled ? "Activo" : "Inactivo", atEnabled ? "status-warn" : "status-muted");
+
+    const inspEnabled = Boolean(insp.enabled);
+    setStatus("sysInspection", inspEnabled ? "Activa" : "Inactiva", inspEnabled ? "status-warn" : "status-muted");
+
+    const last = det.last_update ? String(det.last_update) : "Sin detección";
+    setStatus("sysLastDet", last, det.last_update ? "status-ok" : "status-muted");
+
+    const status = String(det.status || "—");
+    const detected = Boolean(det.detected);
+    let generalCls = "status-muted";
+    if (hasRtspErr || stale) generalCls = "status-danger";
+    else if (detected) generalCls = "status-danger";
+    else generalCls = "status-ok";
+    setStatus("sysGeneral", status, generalCls);
   };
 
   const fmtPct = (v) => {
@@ -35,6 +90,7 @@
 
   const updateStatus = async () => {
     const data = await fetchJson("/detection_status");
+    sysState.detection = data || null;
     const status = String(data.status || "Zona despejada");
     const detected = Boolean(data.detected);
     const count = Number(data.detection_count || 0);
@@ -62,6 +118,8 @@
     } else if (!warn) {
       lastPtzWarning = "";
     }
+
+    renderSystemPanel();
   };
 
   let alertsViewMode = "events"; // events | raw
@@ -193,12 +251,14 @@
 
   const updateCameraUi = async () => {
     const data = await fetchJson("/api/camera_status");
+    sysState.camera = data || null;
     const mode = String(data.camera_type || "fixed");
     const isPtz = mode === "ptz";
     const hw = byId("hwBadge");
     if (hw) hw.textContent = `Cámara Detectada: ${mode}`;
     const panel = byId("ptzPanel");
     if (panel) panel.style.display = isPtz ? "" : "none";
+    renderSystemPanel();
   };
 
   const updateDetectionSummary = async () => {
@@ -218,6 +278,21 @@
 
   const postJson = (url, payload) =>
     fetchJson(url, { method: "POST", body: JSON.stringify(payload || {}) }).catch(() => null);
+
+  const updateAutomationUi = async () => {
+    const [atRes, inspRes] = await Promise.allSettled([fetchJson("/api/auto_tracking"), fetchJson("/api/inspection_mode")]);
+    if (atRes.status === "fulfilled") {
+      sysState.autoTracking = atRes.value || null;
+      const t = byId("autoTrackingToggle");
+      if (t) t.checked = Boolean((atRes.value || {}).enabled);
+    }
+    if (inspRes.status === "fulfilled") {
+      sysState.inspection = inspRes.value || null;
+      const t = byId("inspectionToggle");
+      if (t) t.checked = Boolean((inspRes.value || {}).enabled);
+    }
+    renderSystemPanel();
+  };
 
   const bindPtz = () => {
     const bind = (id, fn) => {
@@ -293,13 +368,19 @@
         if (autoTrackingRequestInFlight) return;
         autoTrackingRequestInFlight = true;
         try {
-          await postJson("/api/auto_tracking", { enabled: autoToggle.checked });
+          const r = await postJson("/api/auto_tracking", { enabled: autoToggle.checked });
+          if (r) sysState.autoTracking = r;
         } finally {
           autoTrackingRequestInFlight = false;
         }
+        renderSystemPanel();
       });
       fetchJson("/api/auto_tracking")
-        .then((d) => (autoToggle.checked = Boolean(d.enabled)))
+        .then((d) => {
+          sysState.autoTracking = d || null;
+          autoToggle.checked = Boolean(d.enabled);
+          renderSystemPanel();
+        })
         .catch(() => null);
     }
 
@@ -310,13 +391,19 @@
         if (inspectionRequestInFlight) return;
         inspectionRequestInFlight = true;
         try {
-          await postJson("/api/inspection_mode", { enabled: inspToggle.checked });
+          const r = await postJson("/api/inspection_mode", { enabled: inspToggle.checked });
+          if (r) sysState.inspection = r;
         } finally {
           inspectionRequestInFlight = false;
         }
+        renderSystemPanel();
       });
       fetchJson("/api/inspection_mode")
-        .then((d) => (inspToggle.checked = Boolean(d.enabled)))
+        .then((d) => {
+          sysState.inspection = d || null;
+          inspToggle.checked = Boolean(d.enabled);
+          renderSystemPanel();
+        })
         .catch(() => null);
     }
   };
@@ -607,10 +694,11 @@
     bindPtz();
     bindManual();
 
-    await Promise.allSettled([updateStatus(), updateAlerts(), updateCameraUi(), updateDetectionSummary()]);
+    await Promise.allSettled([updateStatus(), updateAlerts(), updateCameraUi(), updateDetectionSummary(), updateAutomationUi()]);
     setInterval(() => updateStatus().catch(() => null), 2000);
     setInterval(() => updateAlerts().catch(() => null), 4000);
     setInterval(() => updateCameraUi().catch(() => null), 5000);
+    setInterval(() => updateAutomationUi().catch(() => null), 5000);
     setInterval(() => updateDetectionSummary().catch(() => null), 7000);
   };
 

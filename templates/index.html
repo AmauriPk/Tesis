@@ -191,6 +191,45 @@
                             <span id="hwBadge" class="badge">Cámara: --</span>
                         </div>
 
+                        <!-- Panel de estado del sistema (operador) -->
+                        <div class="card system-status-panel mb-3">
+                            <div class="card-header">
+                                <i class="fa-solid fa-gauge-high"></i> Sistema
+                            </div>
+                            <div class="card-body">
+                                <div class="system-status-grid">
+                                    <div class="system-status-item">
+                                        <div class="system-status-label">Cámara</div>
+                                        <div id="sysCamConn" class="system-status-value status-muted">—</div>
+                                    </div>
+                                    <div class="system-status-item">
+                                        <div class="system-status-label">Tipo</div>
+                                        <div id="sysCamType" class="system-status-value status-muted">—</div>
+                                    </div>
+                                    <div class="system-status-item">
+                                        <div class="system-status-label">PTZ</div>
+                                        <div id="sysPtzReady" class="system-status-value status-muted">—</div>
+                                    </div>
+                                    <div class="system-status-item">
+                                        <div class="system-status-label">Tracking</div>
+                                        <div id="sysTracking" class="system-status-value status-muted">—</div>
+                                    </div>
+                                    <div class="system-status-item">
+                                        <div class="system-status-label">Inspección</div>
+                                        <div id="sysInspection" class="system-status-value status-muted">—</div>
+                                    </div>
+                                    <div class="system-status-item">
+                                        <div class="system-status-label">Última detección</div>
+                                        <div id="sysLastDet" class="system-status-value status-muted">—</div>
+                                    </div>
+                                </div>
+                                <div class="system-status-footer mt-2">
+                                    <span class="text-secondary">Estado general</span>
+                                    <span id="sysGeneral" class="system-status-value status-muted">—</span>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Panel de estado -->
                         <div class="card">
                             <div class="card-header">
