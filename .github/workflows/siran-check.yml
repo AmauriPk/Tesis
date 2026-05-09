@@ -1,0 +1,35 @@
+name: siran-check
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install minimal dependencies (tests only)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest==7.4.4 Flask==2.3.3 Flask-Login==0.6.3 Werkzeug==2.3.8
+
+      - name: Run pytest
+        run: |
+          python -m pytest tests
+
+      - name: Compile key modules (py_compile)
+        run: |
+          python -c "import glob,py_compile,sys; paths=['app.py','config.py','src/system_core.py','src/video_processor.py']; paths+=glob.glob('src/routes/*.py'); paths+=glob.glob('src/services/*.py'); paths+=glob.glob('tests/*.py'); err=0; \
+          [py_compile.compile(p,doraise=True) for p in paths]; print('py_compile ok',len(paths),'files')"
+
