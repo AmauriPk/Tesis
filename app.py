@@ -66,6 +66,7 @@ from src.services.tracking_worker_service import TrackingPTZWorker
 from src.services.media_service import safe_join as _safe_join, safe_rel_path as _safe_rel_path
 from src.services.file_cleanup_service import cleanup_old_evidence as _cleanup_old_evidence
 from src.services.model_params_service import ModelParamsService
+from src.services.session_security_service import SessionSecurityService
 from src.routes.analysis import analysis_bp, init_analysis_routes
 from src.routes.events import events_bp, init_events_routes
 from src.routes.dataset import dataset_bp, init_dataset_routes
@@ -87,7 +88,8 @@ if not _secret_env:
 app.secret_key = _secret_env
 
 # Identificador volátil por arranque: invalida cookies/sesiones previas tras reinicio.
-SESSION_BOOT_ID = secrets.token_hex(16)
+session_security_service = SessionSecurityService()
+SESSION_BOOT_ID = session_security_service.boot_id
 
 init_camera_state_service(root_path=app.root_path)
 
@@ -158,37 +160,21 @@ def _volatile_sessions():
             return None
         # Expiración por inactividad (idle timeout).
         if current_user.is_authenticated:
-            try:
-                raw_timeout = (os.environ.get("SESSION_IDLE_TIMEOUT_SECONDS") or "900").strip()
-                idle_timeout_s = int(raw_timeout)
-            except Exception:
-                idle_timeout_s = 900
-            idle_timeout_s = max(60, min(86400, int(idle_timeout_s)))
-
             now = time.time()
-            last_seen = session.get("last_seen_at")
-            if last_seen is not None:
+            if session_security_service.is_idle_expired(session.get("last_seen_at"), now=now):
                 try:
-                    age_s = now - float(last_seen)
+                    logout_user()
                 except Exception:
-                    age_s = float(idle_timeout_s) + 1.0
-                if float(age_s) > float(idle_timeout_s):
-                    try:
-                        logout_user()
-                    except Exception:
-                        pass
-                    try:
-                        session.clear()
-                    except Exception:
-                        pass
-                    flash("La sesión expiró por inactividad.", "warning")
-                    return redirect(url_for("auth.login"))
-            # Actualizar último visto si no expiró.
-            try:
-                session["last_seen_at"] = float(now)
-            except Exception:
-                pass
-        if current_user.is_authenticated and (session.get("boot_id") != SESSION_BOOT_ID):
+                    pass
+                try:
+                    session.clear()
+                except Exception:
+                    pass
+                flash("La sesión expiró por inactividad.", "warning")
+                return redirect(url_for("auth.login"))
+            session_security_service.mark_seen(session, now=now)
+
+        if current_user.is_authenticated and session_security_service.is_session_from_old_boot(session.get("boot_id")):
             # Sesión de un arranque anterior: cerrar y forzar login.
             try:
                 logout_user()
