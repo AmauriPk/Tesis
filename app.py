@@ -68,6 +68,7 @@ from src.services.file_cleanup_service import cleanup_old_evidence as _cleanup_o
 from src.services.model_params_service import ModelParamsService
 from src.services.session_security_service import SessionSecurityService
 from src.services.camera_config_service import CameraConfigService
+from src.services.ptz_capability_service import PTZCapabilityService
 from src.routes.analysis import analysis_bp, init_analysis_routes
 from src.routes.events import events_bp, init_events_routes
 from src.routes.dataset import dataset_bp, init_dataset_routes
@@ -440,8 +441,25 @@ current_detection_state = {
     "camera_source_mode": camera_source_mode,
 }
 
+ptz_capability_service = PTZCapabilityService(
+    state_lock=state_lock,
+    current_detection_state=current_detection_state,
+    is_camera_configured_ptz=is_camera_configured_ptz,
+    set_auto_tracking_enabled=set_auto_tracking_enabled,
+    set_inspection_mode_enabled=set_inspection_mode_enabled,
+    get_or_create_camera_config=get_or_create_camera_config,
+    normalized_onvif_port=_normalized_onvif_port,
+)
+# Sincroniza estado inicial (compatibilidad con variables globales existentes).
+ptz_capability_service.is_ptz_capable = bool(is_ptz_capable)
+ptz_capability_service.camera_source_mode = str(camera_source_mode)
+ptz_capability_service.onvif_last_probe_at = _onvif_last_probe_at
+ptz_capability_service.onvif_last_probe_error = _onvif_last_probe_error
+ptz_capability_service.last_ptz_ready_automation = _last_ptz_ready_automation
+ptz_capability_service.last_ptz_ready_manual = _last_ptz_ready_manual
+
 def _get_camera_source_mode() -> str:
-    return camera_source_mode
+    return ptz_capability_service.get_camera_source_mode()
 
 
 init_analysis_routes(
@@ -497,15 +515,11 @@ def _set_ptz_capable(value: bool, *, error: str | None = None) -> None:
     - Esto es parte del "bloqueo de rutas de movimiento" cuando la cámara es fija.
     """
     global is_ptz_capable, camera_source_mode, _onvif_last_probe_error
-    with state_lock:
-        is_ptz_capable = bool(value)
-        _onvif_last_probe_error = error
-        configured_ptz = bool(is_camera_configured_ptz())
-        if (not is_ptz_capable) and (not configured_ptz):
-            set_auto_tracking_enabled(False)
-            set_inspection_mode_enabled(False)
-        camera_source_mode = "ptz" if (is_ptz_capable or configured_ptz) else "fixed"
-        current_detection_state["camera_source_mode"] = camera_source_mode
+    ptz_capability_service.set_ptz_capable(bool(value), error=error)
+    # Mantener compatibilidad con variables globales usadas en otros bloques.
+    is_ptz_capable = bool(ptz_capability_service.is_ptz_capable)
+    camera_source_mode = str(ptz_capability_service.camera_source_mode)
+    _onvif_last_probe_error = ptz_capability_service.onvif_last_probe_error
 
 def _probe_onvif_ptz_capability() -> bool:
     """
@@ -513,90 +527,15 @@ def _probe_onvif_ptz_capability() -> bool:
     - Si existe Capabilities.PTZ (XAddr) o el servicio PTZ responde, es PTZ.
     - Si falla cualquier paso (incl. conexión/credenciales), se asume Fija.
     """
-    global _onvif_last_probe_at
+    global _onvif_last_probe_at, _onvif_last_probe_error, is_ptz_capable, camera_source_mode
     with app.app_context():
-        cfg = get_or_create_camera_config()
-        host = (cfg.onvif_host or "").strip()
-        # Importante (robustez):
-        # ONVIF y RTSP suelen usar puertos distintos.
-        # - RTSP típicamente: 554
-        # - ONVIF típicamente: 80 / 8000 / 8080 (según fabricante)
-        # Evitamos asumir que el puerto ONVIF es el mismo que el puerto RTSP.
-        try:
-            raw_onvif_port = int(cfg.onvif_port or 80)
-        except Exception:
-            raw_onvif_port = 80
-        if raw_onvif_port == 554:
-            print("[ONVIF][WARN] onvif_port=554 parece RTSP; usando 80 para ONVIF.")
-        configured_onvif_port = _normalized_onvif_port(raw_onvif_port)
-        username = (cfg.onvif_username or "").strip()
-        password = (cfg.onvif_password or "").strip()
-
-    _onvif_last_probe_at = time.time()
-
-    if not host:
-        _set_ptz_capable(False, error="ONVIF host no configurado.")
-        return False
-    if not username or not password:
-        _set_ptz_capable(False, error="Credenciales ONVIF incompletas.")
-        return False
-
-    def _ports_to_try(port: int) -> list[int]:
-        """
-        Genera una lista de puertos ONVIF a intentar.
-
-        Heuristica:
-        - Si el usuario configuro 554 (RTSP) como puerto ONVIF por error, se prueban primero
-          puertos ONVIF comunes antes de 554.
-
-        Args:
-            port: Puerto configurado por el usuario.
-
-        Returns:
-            Lista de puertos a probar en orden.
-        """
-        common = [80, 8000, 8080]
-        if port == 554:
-            print("[ONVIF][WARN] ONVIF_PORT=554 parece RTSP; se ignorará y se probarán puertos ONVIF comunes.")
-            return common
-        ports: list[int] = [port]
-        for p in common:
-            if p not in ports:
-                ports.append(p)
-        return ports
-
-    last_error: str | None = None
-    for port in _ports_to_try(configured_onvif_port):
-        try:
-            from onvif import ONVIFCamera  # type: ignore
-
-            cam = ONVIFCamera(host, int(port), username, password)
-
-            # Opción A: Capabilities
-            try:
-                dev = cam.create_devicemgmt_service()
-                caps = dev.GetCapabilities({"Category": "All"})
-                ptz_caps = getattr(caps, "PTZ", None)
-                xaddr = getattr(ptz_caps, "XAddr", None) if ptz_caps is not None else None
-                if xaddr:
-                    _set_ptz_capable(True, error=None)
-                    return True
-            except Exception:
-                pass
-
-            # Opción B: crear PTZ service y pedir capacidades
-            try:
-                ptz = cam.create_ptz_service()
-                _ = ptz.GetServiceCapabilities()
-                _set_ptz_capable(True, error=None)
-                return True
-            except Exception as e:
-                last_error = str(e)
-        except Exception as e:
-            last_error = str(e)
-
-    _set_ptz_capable(False, error=last_error or "ONVIF/PTZ no disponible.")
-    return False
+        ok = bool(ptz_capability_service.probe_onvif_ptz_capability())
+    # Mantener compatibilidad con variables globales usadas en otros bloques.
+    _onvif_last_probe_at = ptz_capability_service.onvif_last_probe_at
+    _onvif_last_probe_error = ptz_capability_service.onvif_last_probe_error
+    is_ptz_capable = bool(ptz_capability_service.is_ptz_capable)
+    camera_source_mode = str(ptz_capability_service.camera_source_mode)
+    return bool(ok)
 
 init_admin_camera_routes(
     role_required=role_required,
@@ -612,46 +551,27 @@ app.register_blueprint(admin_camera_bp)
 
 # ======================== PTZ READYNESS HELPERS ========================
 def _ptz_discovered_capable() -> bool:
-    with state_lock:
-        return bool(is_ptz_capable)
+    return bool(ptz_capability_service.ptz_discovered_capable())
 
 
 def _should_log_ptz_ready() -> bool:
-    v = (os.environ.get("DEBUG_PTZ_READY") or "").strip().lower()
-    return v in {"1", "true", "t", "yes", "y", "on"}
+    return bool(ptz_capability_service.should_log_ptz_ready())
 
 
 def _log_ptz_ready(*, kind: str, ready: bool, configured: bool, discovered: bool) -> None:
     global _last_ptz_ready_automation, _last_ptz_ready_manual
-    if _should_log_ptz_ready():
-        print("[PTZ_READY]", f"{kind}={bool(ready)} configured={bool(configured)} discovered={bool(discovered)}")
-        return
-    if str(kind) == "automation":
-        if _last_ptz_ready_automation is None or bool(_last_ptz_ready_automation) != bool(ready):
-            _last_ptz_ready_automation = bool(ready)
-            print("[PTZ_READY]", f"automation={bool(ready)} configured={bool(configured)} discovered={bool(discovered)}")
-        return
-    if str(kind) == "manual":
-        if _last_ptz_ready_manual is None or bool(_last_ptz_ready_manual) != bool(ready):
-            _last_ptz_ready_manual = bool(ready)
-            print("[PTZ_READY]", f"manual={bool(ready)} configured={bool(configured)} discovered={bool(discovered)}")
-        return
+    ptz_capability_service.log_ptz_ready(kind=kind, ready=ready, configured=configured, discovered=discovered)
+    # Mantener compatibilidad con variables globales cacheadas.
+    _last_ptz_ready_automation = ptz_capability_service.last_ptz_ready_automation
+    _last_ptz_ready_manual = ptz_capability_service.last_ptz_ready_manual
 
 
 def is_ptz_ready_for_manual() -> bool:
-    configured_ptz = bool(is_camera_configured_ptz())
-    discovered = bool(_ptz_discovered_capable())
-    ready = bool(configured_ptz or discovered)
-    _log_ptz_ready(kind="manual", ready=ready, configured=configured_ptz, discovered=discovered)
-    return bool(ready)
+    return bool(ptz_capability_service.is_ptz_ready_for_manual())
 
 
 def is_ptz_ready_for_automation() -> bool:
-    configured_ptz = bool(is_camera_configured_ptz())
-    discovered = bool(_ptz_discovered_capable())
-    ready = bool(configured_ptz or discovered)
-    _log_ptz_ready(kind="automation", ready=ready, configured=configured_ptz, discovered=discovered)
-    return bool(ready)
+    return bool(ptz_capability_service.is_ptz_ready_for_automation())
 
 
 ptz_worker = PTZCommandWorker(
