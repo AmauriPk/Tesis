@@ -37,12 +37,6 @@ from flask_login import (
     logout_user,
     login_required,
 )
-from ultralytics import YOLO
-
-try:
-    import torch
-except Exception:  # pragma: no cover
-    torch = None
 
 from config import FLASK_CONFIG, ONVIF_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG, _env_float, _env_int
 from src.system_core import CameraConfig, FrameRecord, MetricsDBWriter, PTZController, User, db
@@ -54,6 +48,7 @@ from src.services.camera_state_service import (
     get_configured_camera_type,
     is_camera_configured_ptz,
 )
+from src.services.yolo_model_service import load_yolo_model
 from src.services.detection_event_service import (
     DetectionEventWriter,
     _ensure_detection_events_schema,
@@ -274,25 +269,7 @@ def bootstrap_users() -> None:
     print("  - admin (role=admin)  # password en DEFAULT_ADMIN_PASSWORD")
     print("  - operador (role=operator)  # password en DEFAULT_OPERATOR_PASSWORD")
 
-# ======================== YOLO (device dinamico) ========================
-def load_yolo_model() -> YOLO | None:
-    """Carga el modelo YOLO y selecciona device dinamico (GPU si existe; si no, CPU)."""
-    try:
-        if torch is None:
-            raise RuntimeError("PyTorch no esta disponible.")
-        device = "cuda:0" if bool(getattr(torch, "cuda", None)) and torch.cuda.is_available() else "cpu"
-        model_path = str(YOLO_CONFIG.get("model_path") or "").strip() or "yolo26s.pt"
-        if not os.path.exists(model_path):
-            print(f"[WARN] No existe YOLO_MODEL_PATH='{model_path}'. Usando fallback 'yolo26s.pt'.")
-            model_path = "yolo26s.pt"
-        model = YOLO(model_path)
-        model.to(device)
-        print(f"[SUCCESS] Modelo YOLO cargado en device={device}.")
-        return model
-    except Exception as e:
-        print(f"[ERROR] No se pudo cargar YOLO: {e}")
-        return None
-
+# ======================== YOLO MODEL ========================
 _metrics_writer = MetricsDBWriter(
     STORAGE_CONFIG.get("db_path", "detections.db"),
     enabled=(os.environ.get("METRICS_LOGGING", "1").strip().lower() not in {"0", "false", "no", "off"}),
@@ -319,7 +296,7 @@ def _metrics_enqueue_with_events(record: FrameRecord) -> None:
     _metrics_writer.enqueue(record)
     _event_writer.enqueue(record)
 
-yolo_model = load_yolo_model()
+yolo_model = load_yolo_model(YOLO_CONFIG)
 
 # ======================== LIVE STATE ========================
 ptz_state_service = PTZStateService()
