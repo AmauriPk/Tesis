@@ -67,6 +67,7 @@ from src.services.media_service import safe_join as _safe_join, safe_rel_path as
 from src.services.file_cleanup_service import cleanup_old_evidence as _cleanup_old_evidence
 from src.services.model_params_service import ModelParamsService
 from src.services.session_security_service import SessionSecurityService
+from src.services.camera_config_service import CameraConfigService
 from src.routes.analysis import analysis_bp, init_analysis_routes
 from src.routes.events import events_bp, init_events_routes
 from src.routes.dataset import dataset_bp, init_dataset_routes
@@ -219,69 +220,24 @@ def allowed_file(filename: str) -> bool:
     """Valida extensión del archivo subido contra `STORAGE_CONFIG['allowed_extensions']`."""
     return "." in filename and filename.rsplit(".", 1)[1].lower() in app.config["ALLOWED_EXTENSIONS"]
 
+camera_config_service = CameraConfigService(
+    db=db,
+    CameraConfig=CameraConfig,
+    rtsp_config=RTSP_CONFIG,
+    onvif_config=ONVIF_CONFIG,
+)
+
+
 def sync_onvif_config_from_env(cfg: CameraConfig) -> CameraConfig:
-    """
-    Completa configuraciÃ³n ONVIF desde variables de entorno si estÃ¡ vacÃ­a.
+    return camera_config_service.sync_onvif_config_from_env(cfg)
 
-    Regla: no sobreescribe valores ya persistidos en DB.
-    """
-    changed = False
-
-    host = (ONVIF_CONFIG.get("host") or "").strip()
-    username = (ONVIF_CONFIG.get("username") or "").strip()
-    password = (ONVIF_CONFIG.get("password") or "").strip()
-
-    try:
-        port_env = int(ONVIF_CONFIG.get("port") or 80)
-    except Exception:
-        port_env = 80
-
-    if not (cfg.onvif_host or "").strip() and host:
-        cfg.onvif_host = host
-        changed = True
-    if not (cfg.onvif_username or "").strip() and username:
-        cfg.onvif_username = username
-        changed = True
-    if not (cfg.onvif_password or "").strip() and password:
-        cfg.onvif_password = password
-        changed = True
-    if not cfg.onvif_port:
-        cfg.onvif_port = int(port_env or 80)
-        changed = True
-
-    if changed:
-        db.session.commit()
-    return cfg
 
 def _normalized_onvif_port(port: int | None) -> int:
-    """Normaliza el puerto ONVIF, evitando el puerto RTSP (554)."""
-    try:
-        p = int(port or 80)
-    except Exception:
-        p = 80
-    if p == 554:
-        return 80
-    return p
+    return camera_config_service.normalized_onvif_port(port)
+
 
 def get_or_create_camera_config() -> CameraConfig:
-    """Obtiene o inicializa el registro singleton con configuración RTSP/ONVIF."""
-    cfg = CameraConfig.query.order_by(CameraConfig.id.asc()).first()
-    if cfg:
-        return sync_onvif_config_from_env(cfg)
-
-    cfg = CameraConfig(
-        camera_type="fixed",
-        rtsp_url=RTSP_CONFIG.get("url"),
-        rtsp_username=RTSP_CONFIG.get("username"),
-        rtsp_password=RTSP_CONFIG.get("password"),
-        onvif_host=(ONVIF_CONFIG.get("host") or "").strip() or None,
-        onvif_port=int(ONVIF_CONFIG.get("port") or 80),
-        onvif_username=(ONVIF_CONFIG.get("username") or "").strip() or None,
-        onvif_password=(ONVIF_CONFIG.get("password") or "").strip() or None,
-    )
-    db.session.add(cfg)
-    db.session.commit()
-    return cfg
+    return camera_config_service.get_or_create_camera_config()
 
 def bootstrap_users() -> None:
     """Crea usuarios por defecto en primera ejecución (solo si la tabla está vacía)."""
