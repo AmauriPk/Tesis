@@ -148,49 +148,56 @@ class TrackingPTZWorker:
                 bottom_edge = float(y2) >= float(fh) * 0.95
                 edge_boost_applied = False
 
+                try:
+                    k_pan = float(os.environ.get("PTZ_K_PAN", "0.8"))
+                except Exception:
+                    k_pan = 0.8
+                try:
+                    k_tilt = float(os.environ.get("PTZ_K_TILT", "0.8"))
+                except Exception:
+                    k_tilt = 0.8
+
+                # Error normalizado [-0.5, 0.5]: (0,0) = centro del frame
+                error_x = (cx / float(fw)) - 0.5
+                error_y = (cy / float(fh)) - 0.5
+                deadzone_half = float(tolerance_frac) / 2.0
+
+                def _prop_clamp(raw: float, min_s: float, max_s: float) -> float:
+                    if abs(raw) < min_s:
+                        return 0.0
+                    return float(max(min_s, min(max_s, abs(raw)))) * (1.0 if raw > 0 else -1.0)
+
                 pan = 0.0
                 reason = "center"
-                if cx < (fx - deadzone_x):
-                    pan = -float(pan_speed)
-                    reason = "left"
-                elif cx > (fx + deadzone_x):
-                    pan = float(pan_speed)
-                    reason = "right"
+                if abs(error_x) >= deadzone_half:
+                    raw_pan = float(k_pan) * float(error_x)
+                    pan = _prop_clamp(raw_pan, float(min_speed), float(max_speed))
+                    if pan > 1e-6:
+                        reason = "right"
+                    elif pan < -1e-6:
+                        reason = "left"
 
                 tilt = 0.0
                 if top_edge:
-                    tilt = float(tilt_speed) * float(edge_tilt_boost)
+                    tilt = float(self._clamp(float(tilt_speed) * float(edge_tilt_boost), -1.0, 1.0))
                     edge_boost_applied = True
                     reason = "top_edge"
                 elif bottom_edge:
-                    tilt = -float(tilt_speed) * float(edge_tilt_boost)
+                    tilt = float(self._clamp(-float(tilt_speed) * float(edge_tilt_boost), -1.0, 1.0))
                     edge_boost_applied = True
                     reason = "bottom_edge"
-                else:
-                    if cy < (fy - deadzone_y):
-                        tilt = float(tilt_speed)
+                elif abs(error_y) >= deadzone_half:
+                    raw_tilt = -float(k_tilt) * float(error_y)
+                    tilt = _prop_clamp(raw_tilt, float(min_speed), float(max_speed))
+                    if tilt > 1e-6:
                         reason = "up"
-                    elif cy > (fy + deadzone_y):
-                        tilt = -float(tilt_speed)
+                    elif tilt < -1e-6:
                         reason = "down"
-
-                if abs(float(tilt)) > 1.0:
-                    tilt = 1.0 if float(tilt) > 0 else -1.0
 
                 if os.environ.get("PTZ_INVERT_PAN", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}:
                     pan = -1.0 * float(pan)
                 if os.environ.get("PTZ_INVERT_TILT", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}:
                     tilt = -1.0 * float(tilt)
-
-                def _apply_min(v: float) -> float:
-                    if abs(float(v)) < 1e-6:
-                        return 0.0
-                    sign = 1.0 if float(v) > 0 else -1.0
-                    mag = float(min(max(abs(float(v)), float(min_speed)), float(max_speed)))
-                    return float(sign) * float(mag)
-
-                pan = _apply_min(float(pan))
-                tilt = _apply_min(float(tilt))
 
                 if abs(float(pan)) < 1e-6 and abs(float(tilt)) < 1e-6:
                     if top_edge or bottom_edge:

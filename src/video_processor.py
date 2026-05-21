@@ -168,17 +168,35 @@ def ptz_centering_vector(
 
     spd = float(abs(float(max_speed)))
 
+    try:
+        k_pan = float(os.environ.get("PTZ_K_PAN", "0.8"))
+    except Exception:
+        k_pan = 0.8
+    try:
+        k_tilt = float(os.environ.get("PTZ_K_TILT", "0.8"))
+    except Exception:
+        k_tilt = 0.8
+    try:
+        min_spd = float(os.environ.get("PTZ_TRACKING_MIN_SPEED", "0.12"))
+    except Exception:
+        min_spd = 0.12
+
+    # Error normalizado [-0.5, 0.5]: (0,0) = centro del frame
+    error_x = (cx / float(fw)) - 0.5
+    error_y = (cy / float(fh)) - 0.5
+
+    def _prop_clamp(raw: float, mn: float, mx: float) -> float:
+        if abs(raw) < mn:
+            return 0.0
+        return float(max(mn, min(mx, abs(raw)))) * (1.0 if raw > 0 else -1.0)
+
     pan = 0.0
-    if cx < (fx - deadzone_x):
-        pan = -float(spd)
-    elif cx > (fx + deadzone_x):
-        pan = float(spd)
+    if abs(error_x) >= float(tol):
+        pan = _prop_clamp(float(k_pan) * float(error_x), float(min_spd), float(spd))
 
     tilt = 0.0
-    if cy < (fy - deadzone_y):
-        tilt = float(spd)
-    elif cy > (fy + deadzone_y):
-        tilt = -float(spd)
+    if abs(error_y) >= float(tol):
+        tilt = _prop_clamp(-float(k_tilt) * float(error_y), float(min_spd), float(spd))
 
     if os.environ.get("PTZ_INVERT_PAN", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}:
         pan = -1.0 * float(pan)

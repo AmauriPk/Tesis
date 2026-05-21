@@ -34,7 +34,14 @@ YOLO_CONFIG = {
     "verbose": _env_bool("YOLO_VERBOSE", False),
 }
 
-# ======================== CONFIGURACIÃ“N DE VIDEO ========================
+# ======================== CONFIGURACIÃ”N PTZ ========================
+# PTZ_K_PAN  (float, default 0.8) — factor proporcional pan:  pan_cmd  = K_pan  * error_x
+# PTZ_K_TILT (float, default 0.8) — factor proporcional tilt: tilt_cmd = K_tilt * error_y
+# Ambos actúan fuera de la deadzone (PTZ_TRACKING_TOLERANCE) y se clampean a
+# [PTZ_TRACKING_MIN_SPEED, PTZ_TRACKING_MAX_SPEED]. Ajustar para controlar
+# agresividad de la corrección: valores > 1.0 amplifican el error (corrección más rápida).
+
+# ======================== CONFIGURACIÃ”N DE VIDEO ========================
 VIDEO_CONFIG = {
     "width": _env_int("VIDEO_WIDTH", 1280),
     "height": _env_int("VIDEO_HEIGHT", 720),
