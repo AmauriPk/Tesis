@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import queue
 import sqlite3
@@ -11,6 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from flask_login import UserMixin
 from flask_sqlalchemy import SQLAlchemy
@@ -459,7 +462,7 @@ class MetricsDBWriter:
 
                     con.commit()
                 except (sqlite3.DatabaseError, sqlite3.IntegrityError, sqlite3.OperationalError) as e:
-                    print(f"[METRICS_DB] Insert error: {e}")
+                    logger.error("MetricsDB insert error: %s", e)
                     try:
                         con.rollback()
                     except sqlite3.Error:

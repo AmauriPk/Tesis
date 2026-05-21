@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 
 class PTZCapabilityService:
@@ -71,17 +74,17 @@ class PTZCapabilityService:
 
     def log_ptz_ready(self, *, kind: str, ready: bool, configured: bool, discovered: bool) -> None:
         if self.should_log_ptz_ready():
-            print("[PTZ_READY]", f"{kind}={bool(ready)} configured={bool(configured)} discovered={bool(discovered)}")
+            logger.debug("PTZ ready: %s=%s configured=%s discovered=%s", kind, bool(ready), bool(configured), bool(discovered))
             return
         if str(kind) == "automation":
             if self.last_ptz_ready_automation is None or bool(self.last_ptz_ready_automation) != bool(ready):
                 self.last_ptz_ready_automation = bool(ready)
-                print("[PTZ_READY]", f"automation={bool(ready)} configured={bool(configured)} discovered={bool(discovered)}")
+                logger.info("PTZ ready: automation=%s configured=%s discovered=%s", bool(ready), bool(configured), bool(discovered))
             return
         if str(kind) == "manual":
             if self.last_ptz_ready_manual is None or bool(self.last_ptz_ready_manual) != bool(ready):
                 self.last_ptz_ready_manual = bool(ready)
-                print("[PTZ_READY]", f"manual={bool(ready)} configured={bool(configured)} discovered={bool(discovered)}")
+                logger.info("PTZ ready: manual=%s configured=%s discovered=%s", bool(ready), bool(configured), bool(discovered))
             return
 
     def is_ptz_ready_for_manual(self) -> bool:
@@ -123,7 +126,7 @@ class PTZCapabilityService:
         except Exception:
             raw_onvif_port = 80
         if raw_onvif_port == 554:
-            print("[ONVIF][WARN] onvif_port=554 parece RTSP; usando 80 para ONVIF.")
+            logger.warning("onvif_port=554 parece RTSP; usando 80 para ONVIF.")
         configured_onvif_port = self.normalized_onvif_port(raw_onvif_port)
         username = (getattr(cfg, "onvif_username", None) or "").strip()
         password = (getattr(cfg, "onvif_password", None) or "").strip()
@@ -140,7 +143,7 @@ class PTZCapabilityService:
         def _ports_to_try(port: int) -> list[int]:
             common = [80, 8000, 8080]
             if port == 554:
-                print("[ONVIF][WARN] ONVIF_PORT=554 parece RTSP; se ignorará y se probarán puertos ONVIF comunes.")
+                logger.warning("ONVIF_PORT=554 parece RTSP; se ignorará y se probarán puertos ONVIF comunes.")
                 return common
             ports: list[int] = [port]
             for p in common:

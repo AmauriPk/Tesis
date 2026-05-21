@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 import time
 from typing import Any, Callable, Optional, Type
+
+logger = logging.getLogger(__name__)
 
 
 def _ptz_vector(direction: str):
@@ -98,10 +101,9 @@ class PTZCommandWorker:
                     "source": str(source or "manual"),
                 }
             )
-            print(
-                "[PTZ_QUEUE]",
-                f"enqueue move source={str(source or 'manual')} x={float(x_f):.3f} y={float(y_f):.3f} "
-                f"zoom={float(zoom):.3f} duration={float(duration_s):.2f}",
+            logger.debug(
+                "PTZ queue enqueue move source=%s x=%.3f y=%.3f zoom=%.3f duration=%.2f",
+                str(source or 'manual'), float(x_f), float(y_f), float(zoom), float(duration_s),
             )
         except Exception:
             pass
@@ -124,7 +126,7 @@ class PTZCommandWorker:
                 pass
             self._last_vec = (0.0, 0.0)
             self._q.put_nowait({"type": "stop"})
-            print("[PTZ_QUEUE]", "enqueue stop")
+            logger.debug("PTZ queue enqueue stop")
         except Exception:
             pass
 
@@ -141,18 +143,16 @@ class PTZCommandWorker:
                 return None
             port = self._normalized_onvif_port(cfg.onvif_port)
             if int(cfg.onvif_port or 0) == 554:
-                print("[ONVIF][WARN] onvif_port=554 parece RTSP; usando 80 para ONVIF.")
+                logger.warning("onvif_port=554 parece RTSP; usando 80 para ONVIF.")
             username = str(cfg.onvif_username or "")
             password = str(cfg.onvif_password or "")
-            print(
-                "[PTZ_CFG]",
-                {
-                    "host": str(cfg.onvif_host or ""),
-                    "port": int(port),
-                    "username": username,
-                    "password_configurada": bool(password),
-                    "password_len": len(password) if password else 0,
-                },
+            logger.debug(
+                "PTZ config host=%s port=%s username=%s password_configurada=%s password_len=%s",
+                str(cfg.onvif_host or ""),
+                int(port),
+                username,
+                bool(password),
+                len(password) if password else 0,
             )
             return self._PTZController(
                 host=cfg.onvif_host,
@@ -179,36 +179,34 @@ class PTZCommandWorker:
                 if self._controller is None:
                     self._controller = self._get_controller()
                 if self._controller is None:
-                    print(f"[PTZ_WORKER][ERROR] source={cmd_source} error=no_controller_configured")
+                    logger.error("PTZ worker no_controller_configured source=%s", cmd_source)
                     continue
                 if cmd_type == "stop":
-                    print("[PTZ_WORKER]", "executing stop")
+                    logger.debug("PTZ worker executing stop")
                     self._controller.stop()
-                    print("[PTZ_WORKER]", "done stop")
+                    logger.debug("PTZ worker done stop")
                     continue
                 if cmd_type == "move":
                     x = float(cmd.get("x") or 0.0)
                     y = float(cmd.get("y") or 0.0)
                     z = float(cmd.get("zoom") or 0.0)
                     duration_s = float(cmd.get("duration_s") or 0.15)
-                    print(
-                        "[PTZ_WORKER]",
-                        f"executing move source={cmd_source} x={float(x):.3f} y={float(y):.3f} "
-                        f"zoom={float(z):.3f} duration={float(duration_s):.2f}",
+                    logger.debug(
+                        "PTZ worker executing move source=%s x=%.3f y=%.3f zoom=%.3f duration=%.2f",
+                        cmd_source, float(x), float(y), float(z), float(duration_s),
                     )
                     self._controller.continuous_move(x=x, y=y, zoom=z, duration_s=duration_s)
-                    print("[PTZ_WORKER]", f"done move source={cmd_source}")
+                    logger.debug("PTZ worker done move source=%s", cmd_source)
             except Exception as e:
                 msg = str(e) or e.__class__.__name__
                 low = msg.lower()
                 if cmd_type == "move" and cmd_source in {"auto", "tracking", "inspection"} and ("out of bounds" in low):
-                    # Mantener string/log legado (mismo tag/mensaje).
-                    print("[PTZ][WARN] Movimiento automÃ¡tico fuera de rango. Se ignora comando y se envÃ­a STOP.")
+                    logger.warning("PTZ movimiento automático fuera de rango. Se ignora comando y se envía STOP.")
                     try:
                         if self._controller is not None:
                             self._controller.stop()
                     except Exception:
                         pass
                     continue
-                print(f"[PTZ_WORKER][ERROR] source={cmd_source} error={msg}")
+                logger.error("PTZ worker error source=%s error=%s", cmd_source, msg)
                 self._controller = None

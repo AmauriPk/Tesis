@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import struct
@@ -9,6 +10,8 @@ from typing import Any, Callable
 
 from flask import Blueprint, Response, jsonify, request
 from flask_login import login_required
+
+logger = logging.getLogger(__name__)
 
 events_bp = Blueprint("events", __name__)
 
@@ -63,7 +66,7 @@ def init_events_routes(**deps: Any) -> None:
 
         try:
             if not os.path.exists(db_path):
-                print(f"[ALERTS] db={db_path} missing_db=1")
+                logger.debug("alerts db=%s missing_db=1", db_path)
                 return jsonify({"status": "success", "alerts": alerts}), 200
 
             con = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
@@ -110,7 +113,7 @@ def init_events_routes(**deps: Any) -> None:
                     )
                     rows = cur.fetchall() or []
                 else:
-                    print(f"[WARN] Panel de Alertas: no hay tablas esperadas en DB. tables={sorted(tables)}")
+                    logger.warning("Panel de Alertas: no hay tablas esperadas en DB. tables=%s", sorted(tables))
                     return jsonify({"status": "success", "alerts": []}), 200
                 alerts = []
                 def _to_int(v):
@@ -212,7 +215,7 @@ def init_events_routes(**deps: Any) -> None:
                             "evidence_url": image_url,
                         }
                     )
-                print(f"[ALERTS] db={db_path} table={using_table} rows={len(alerts)}")
+                logger.debug("alerts db=%s table=%s rows=%s", db_path, using_table, len(alerts))
                 return jsonify({"ok": True, "status": "success", "alerts": alerts, "table": using_table}), 200
             finally:
                 try:
@@ -221,7 +224,7 @@ def init_events_routes(**deps: Any) -> None:
                     pass
         except Exception as e:
             # DB bloqueada/corrupta/etc => no romper UI del operador.
-            print(f"[ERROR] Panel de Alertas DB: {e}")
+            logger.error("Panel de Alertas DB error: %s", e)
             return jsonify({"ok": True, "status": "success", "alerts": []}), 200
 
     @events_bp.get("/api/recent_detection_events")
@@ -298,7 +301,7 @@ def init_events_routes(**deps: Any) -> None:
                 except Exception:
                     pass
         except Exception as e:
-            print(f"[EVENTS][ERROR] {e}")
+            logger.error("events error: %s", e)
             return jsonify({"ok": True, "status": "success", "events": []}), 200
 
     @events_bp.get("/api/export_detection_events.csv")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import queue
 import sqlite3
@@ -9,6 +10,8 @@ from datetime import datetime
 
 from config import _env_int
 from src.system_core import FrameRecord
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_iso_ts_to_epoch(ts_iso: str | None) -> float | None:
@@ -99,7 +102,7 @@ class DetectionEventWriter:
             con.execute("PRAGMA journal_mode=WAL;")
             con.execute("PRAGMA synchronous=NORMAL;")
         except Exception as e:
-            print(f"[EVENT_DB][WARN] pragma err={e}")
+            logger.warning("EVENT_DB pragma error: %s", e)
         _ensure_detection_events_schema(con)
         return con
 
@@ -126,9 +129,9 @@ class DetectionEventWriter:
                 ),
             )
             con.commit()
-            print(f"[EVENT] closed id={int(self._active_event_id)}")
+            logger.info("event closed id=%s", int(self._active_event_id))
         except Exception as e:
-            print(f"[EVENT][ERROR] close_failed id={self._active_event_id} err={e}")
+            logger.error("event close_failed id=%s err=%s", self._active_event_id, e)
         finally:
             self._active_event_id = None
             self._active_started_iso = None
@@ -160,9 +163,9 @@ class DetectionEventWriter:
             self._active_count = 0
             self._active_best_bbox_text = None
             self._active_best_evidence_path = None
-            print(f"[EVENT] created id={int(self._active_event_id)}")
+            logger.info("event created id=%s", int(self._active_event_id))
         except Exception as e:
-            print(f"[EVENT][ERROR] create_failed err={e}")
+            logger.error("event create_failed: %s", e)
             self._active_event_id = None
 
     def _update_active_event(self, con: sqlite3.Connection) -> None:
@@ -192,9 +195,9 @@ class DetectionEventWriter:
             now = time.time()
             if (now - float(self._last_event_log_at)) >= 2.0:
                 self._last_event_log_at = now
-                print(f"[EVENT] updated id={int(self._active_event_id)} max_conf={float(self._active_max_conf):.3f}")
+                logger.debug("event updated id=%s max_conf=%.3f", int(self._active_event_id), float(self._active_max_conf))
         except Exception as e:
-            print(f"[EVENT][ERROR] update_failed id={self._active_event_id} err={e}")
+            logger.error("event update_failed id=%s err=%s", self._active_event_id, e)
 
     def _run(self) -> None:
         con: sqlite3.Connection | None = None
@@ -209,7 +212,7 @@ class DetectionEventWriter:
                 if n <= 0:
                     self._backfill_from_detections(con)
             except Exception as e:
-                print(f"[EVENT][WARN] backfill_failed err={e}")
+                logger.warning("event backfill_failed: %s", e)
 
             while not self._stop.is_set():
                 try:
@@ -223,7 +226,7 @@ class DetectionEventWriter:
                             self._close_active_event(con)
                     continue
                 except Exception as e:
-                    print(f"[EVENT][ERROR] run_loop err={e}")
+                    logger.error("event run_loop error: %s", e)
                     continue
 
                 # Solo agrupar frames confirmados (con detecciones).
@@ -281,13 +284,13 @@ class DetectionEventWriter:
                                 x1, y1, x2, y2 = [int(v) for v in bbox]
                                 best_bbox = f"{x1},{y1},{x2},{y2}"
                         except Exception as e:
-                            print(f"[EVENT][WARN] bbox_parse err={e}")
+                            logger.warning("event bbox_parse error: %s", e)
                         try:
                             p = d.get("evidence_path") or d.get("image_path") or None
                             if p:
                                 best_img = str(p).replace("\\", "/")
                         except Exception as e:
-                            print(f"[EVENT][WARN] evidence_path err={e}")
+                            logger.warning("event evidence_path error: %s", e)
 
                 if best_conf >= float(self._active_max_conf):
                     self._active_max_conf = float(best_conf)
@@ -296,7 +299,7 @@ class DetectionEventWriter:
 
                 self._update_active_event(con)
         except Exception as e:
-            print(f"[EVENT][ERROR] fatal err={e}")
+            logger.exception("event fatal error: %s", e)
         finally:
             if con is not None:
                 try:
@@ -419,5 +422,5 @@ class DetectionEventWriter:
             con.commit()
 
         _flush_close()
-        print(f"[EVENT] backfill done events_ready=1 rows={len(rows)}")
+        logger.info("event backfill done events_ready=1 rows=%s", len(rows))
 

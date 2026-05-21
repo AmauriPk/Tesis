@@ -7,8 +7,11 @@ Responsabilidades:
   - Resolución de ruta del modelo con fallback
   - Carga del modelo con manejo de errores
 """
+import logging
 import os
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     import torch
@@ -67,7 +70,7 @@ def resolve_yolo_model_path(
     
     if not os.path.exists(model_path):
         if model_path != fallback:
-            print(f"[WARN] No existe YOLO_MODEL_PATH='{model_path}'. Usando fallback '{fallback}'.")
+            logger.warning("No existe YOLO_MODEL_PATH='%s'. Usando fallback '%s'.", model_path, fallback)
         model_path = fallback
     
     return model_path
@@ -110,9 +113,9 @@ def load_yolo_model(yolo_config: dict) -> Optional[Any]:
         model.to(device)
         
         # 5. Log de éxito
-        print(f"[SUCCESS] Modelo YOLO cargado en device={device}.")
+        logger.info("Modelo YOLO cargado en device=%s", device)
         return model
-        
+
     except Exception as e:
-        print(f"[ERROR] No se pudo cargar YOLO: {e}")
+        logger.error("No se pudo cargar YOLO: %s", e)
         return None

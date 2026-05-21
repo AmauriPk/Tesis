@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable
 
 from flask import Blueprint, jsonify, request
 from flask_login import login_required
+
+logger = logging.getLogger(__name__)
 
 ptz_manual_bp = Blueprint("ptz_manual", __name__)
 
@@ -58,9 +61,9 @@ def init_ptz_manual_routes(**deps: Any) -> None:
         configured_ptz = bool(is_camera_configured_ptz())
         ptz_capable = bool(ptz_discovered_capable())
         ready = bool(is_ptz_ready_for_manual())
-        print(
-            "[PTZ_READY]",
-            f"manual={bool(ready)} configured={bool(configured_ptz)} discovered={bool(ptz_capable)}",
+        logger.debug(
+            "PTZ ready check: manual=%s configured=%s discovered=%s",
+            bool(ready), bool(configured_ptz), bool(ptz_capable),
         )
         if not ready:
             return (
@@ -78,7 +81,7 @@ def init_ptz_manual_routes(**deps: Any) -> None:
         if not username or not password:
             return jsonify({"ok": False, "error": "Credenciales ONVIF incompletas (ONVIF_USERNAME/ONVIF_PASSWORD)."}), 400
         if int(cfg.onvif_port or 0) == 554:
-            print("[ONVIF][WARN] onvif_port=554 parece RTSP; usando 80 para ONVIF.")
+            logger.warning("onvif_port=554 parece RTSP; usando 80 para ONVIF.")
 
         payload = request.get_json(silent=True) or {}
         direction = (payload.get("direction") or "").strip().lower()
@@ -109,9 +112,9 @@ def init_ptz_manual_routes(**deps: Any) -> None:
         configured_ptz = bool(is_camera_configured_ptz())
         ptz_capable = bool(ptz_discovered_capable())
         ready = bool(is_ptz_ready_for_manual())
-        print(
-            "[PTZ_READY]",
-            f"manual={bool(ready)} configured={bool(configured_ptz)} discovered={bool(ptz_capable)}",
+        logger.debug(
+            "PTZ ready check: manual=%s configured=%s discovered=%s",
+            bool(ready), bool(configured_ptz), bool(ptz_capable),
         )
         if not ready:
             return (
@@ -130,8 +133,9 @@ def init_ptz_manual_routes(**deps: Any) -> None:
                 tracking_target_state["has_target"] = False
                 tracking_target_state["bbox"] = None
                 tracking_target_state["updated_at"] = 0.0
-        print(
-            f"[PTZ_STOP] source={source} disable_tracking={bool(disable_tracking)} auto_tracking={bool(get_auto_tracking_enabled())}"
+        logger.debug(
+            "PTZ stop: source=%s disable_tracking=%s auto_tracking=%s",
+            source, bool(disable_tracking), bool(get_auto_tracking_enabled()),
         )
         ptz_worker.enqueue_stop()
         if source == "manual" and bool(disable_tracking):

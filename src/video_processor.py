@@ -7,6 +7,7 @@ persistencia por frames, telemetrÃ­a y publicaciÃ³n MJPEG.
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -18,6 +19,8 @@ import cv2
 import numpy as np
 
 from src.system_core import clamp, select_priority_detection
+
+logger = logging.getLogger(__name__)
 
 try:
     import torch
@@ -294,7 +297,7 @@ class RTSPLatestFrameReader:
                         self._is_connected = False
                     now = time.time()
                     if (now - float(self._last_reconnect_log_at)) >= 2.0:
-                        print("[RTSP] reconnecting...")
+                        logger.debug("RTSP reconnecting...")
                         self._last_reconnect_log_at = now
                     src: Any = self._current_url
                     if isinstance(src, str) and src.strip().isdigit():
@@ -330,7 +333,7 @@ class RTSPLatestFrameReader:
                         self._is_connected = False
                     now = time.time()
                     if (now - float(self._last_timeout_log_at)) >= 2.5:
-                        print("[RTSP] timeout/no frame")
+                        logger.debug("RTSP timeout/no frame")
                         self._last_timeout_log_at = now
                     try:
                         cap.release()
@@ -350,7 +353,7 @@ class RTSPLatestFrameReader:
                     self._is_connected = True
                     self._last_error = None
                 if not was_connected:
-                    print("[RTSP] connected")
+                    logger.info("RTSP connected")
         finally:
             if cap is not None:
                 try:
@@ -550,7 +553,7 @@ class LiveVideoProcessor:
 
         if float(best_conf) < float(min_conf):
             if (now - float(self._last_evidence_skip_log_at)) > 2.0:
-                print(f"[EVIDENCE] skipped reason=confidence conf={float(best_conf):.3f} min={float(min_conf):.3f}")
+                logger.debug("evidence skipped reason=confidence conf=%.3f min=%.3f", float(best_conf), float(min_conf))
                 self._last_evidence_skip_log_at = now
             return
 
@@ -579,7 +582,7 @@ class LiveVideoProcessor:
         self._evidence_saved_for_active_detection = True
         self._last_evidence_saved_at = now
         self._best_evidence_conf_for_active_detection = float(best_conf)
-        print(f"[EVIDENCE] saved path={rel_path} conf={float(best_conf):.3f}")
+        logger.info("evidence saved path=%s conf=%.3f", rel_path, float(best_conf))
 
     def _update_ui_state(
         self,
@@ -695,7 +698,7 @@ class LiveVideoProcessor:
                 try:
                     self._save_evidence(frame, detection_list)
                 except Exception as e:
-                    print(f"[EVIDENCE][ERROR] save failed: {e}")
+                    logger.exception("evidence save failed")
             else:
                 self._evidence_saved_for_active_detection = False
                 self._best_evidence_conf_for_active_detection = 0.0
@@ -719,7 +722,7 @@ class LiveVideoProcessor:
                     )
                     self.metrics_enqueue(record)
                 except Exception as e:
-                    print(f"[METRICS][WARN] enqueue failed: {e}")
+                    logger.warning("metrics enqueue failed: %s", e)
 
             # Tracking PTZ: solo publicamos el objetivo para un worker externo (app.py).
             try:
@@ -742,7 +745,7 @@ class LiveVideoProcessor:
                             }
                         )
             except Exception as e:
-                print(f"[TRACKING][WARN] update_target failed: {e}")
+                logger.warning("tracking update_target failed: %s", e)
 
             self._update_ui_state(confirmed=confirmed, consecutive_hits=consecutive_hits, detection_list=detection_list)
 

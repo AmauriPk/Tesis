@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Any, Callable
@@ -9,6 +10,8 @@ from urllib.parse import urlparse
 import cv2
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import login_required
+
+logger = logging.getLogger(__name__)
 
 admin_camera_bp = Blueprint("admin_camera", __name__)
 
@@ -195,16 +198,14 @@ def init_admin_camera_routes(**deps: Any) -> None:
         try:
             port = normalized_onvif_port(cfg.onvif_port)
             if int(cfg.onvif_port or 0) == 554:
-                print("[ONVIF][WARN] onvif_port=554 parece RTSP; usando 80 para ONVIF.")
-            print(
-                "[PTZ_CFG]",
-                {
-                    "host": str(cfg.onvif_host or ""),
-                    "port": int(port),
-                    "username": str(cfg.onvif_username or ""),
-                    "password_configurada": bool(cfg.onvif_password),
-                    "password_len": len(cfg.onvif_password) if cfg.onvif_password else 0,
-                },
+                logger.warning("onvif_port=554 parece RTSP; usando 80 para ONVIF.")
+            logger.debug(
+                "PTZ config host=%s port=%s username=%s password_configurada=%s password_len=%s",
+                str(cfg.onvif_host or ""),
+                int(port),
+                str(cfg.onvif_username or ""),
+                bool(cfg.onvif_password),
+                len(cfg.onvif_password) if cfg.onvif_password else 0,
             )
             controller = PTZController(cfg.onvif_host, int(port), cfg.onvif_username, cfg.onvif_password)
             return jsonify(controller.test_connection())

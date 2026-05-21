@@ -11,11 +11,14 @@ No depende de variables globales de app.py ni de Flask.
 """
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
 
 import cv2
+
+logger = logging.getLogger(__name__)
 
 try:
     import imageio_ffmpeg  # type: ignore
@@ -34,7 +37,7 @@ def resolve_ffmpeg_bin() -> str | None:
     if env_path:
         try:
             if os.path.exists(env_path):
-                print(f"[VIDEO_TRANSCODE] using FFMPEG_BIN={env_path}")
+                logger.info("video_transcode using FFMPEG_BIN=%s", env_path)
                 return env_path
         except Exception:
             pass
@@ -42,7 +45,7 @@ def resolve_ffmpeg_bin() -> str | None:
     try:
         p = shutil.which("ffmpeg")
         if p:
-            print(f"[VIDEO_TRANSCODE] using PATH ffmpeg={p}")
+            logger.info("video_transcode using PATH ffmpeg=%s", p)
             return p
     except Exception:
         pass
@@ -51,12 +54,12 @@ def resolve_ffmpeg_bin() -> str | None:
         try:
             p = imageio_ffmpeg.get_ffmpeg_exe()  # type: ignore[attr-defined]
             if p and os.path.exists(p):
-                print(f"[VIDEO_TRANSCODE] using imageio_ffmpeg={p}")
+                logger.info("video_transcode using imageio_ffmpeg=%s", p)
                 return str(p)
         except Exception as e:
-            print(f"[VIDEO_TRANSCODE][WARN] imageio_ffmpeg unavailable err={str(e) or e.__class__.__name__}")
+            logger.warning("video_transcode imageio_ffmpeg unavailable: %s", str(e) or e.__class__.__name__)
 
-    print("[VIDEO_TRANSCODE][ERROR] ffmpeg no encontrado. Instale FFmpeg, configure FFMPEG_BIN o instale imageio-ffmpeg.")
+    logger.error("ffmpeg no encontrado. Instale FFmpeg, configure FFMPEG_BIN o instale imageio-ffmpeg.")
     return None
 
 
@@ -79,7 +82,7 @@ def create_video_writer(output_path: str, fps: float, width: int, height: int):
             fourcc = cv2.VideoWriter_fourcc(*codec)
             out = cv2.VideoWriter(path, fourcc, float(fps), (int(width), int(height)))
             opened = bool(out is not None and out.isOpened())
-            print("[VIDEO_WRITER]", f"codec={codec} opened={bool(opened)} path={path}")
+            logger.debug("video_writer codec=%s opened=%s path=%s", codec, bool(opened), path)
             if opened:
                 return out, path, codec
             try:
@@ -87,13 +90,13 @@ def create_video_writer(output_path: str, fps: float, width: int, height: int):
             except Exception:
                 pass
             if codec != candidates[-1][0]:
-                print("[VIDEO_WRITER][WARN]", f"{codec} falló, intentando siguiente codec")
+                logger.warning("video_writer codec=%s falló, intentando siguiente codec", codec)
         except Exception as e:
             if codec != candidates[-1][0]:
-                print("[VIDEO_WRITER][WARN]", f"{codec} falló ({str(e) or e.__class__.__name__}), intentando siguiente codec")
+                logger.warning("video_writer codec=%s falló (%s), intentando siguiente codec", codec, str(e) or e.__class__.__name__)
             continue
 
-    print("[VIDEO_WRITER][ERROR] no se pudo inicializar ningún codec")
+    logger.error("video_writer no se pudo inicializar ningún codec")
     return None, None, None
 
 
@@ -107,12 +110,12 @@ def transcode_to_browser_mp4(input_path: str, output_path: str) -> tuple[bool, s
     in_path = str(input_path)
     out_path = str(output_path)
 
-    print(f"[VIDEO_TRANSCODE] input={in_path} output={out_path}")
+    logger.info("video_transcode input=%s output=%s", in_path, out_path)
 
     ffmpeg_bin = resolve_ffmpeg_bin()
 
     if not ffmpeg_bin:
-        print("[VIDEO_TRANSCODE] success=False reason=ffmpeg_missing")
+        logger.warning("video_transcode success=False reason=ffmpeg_missing")
         return False, "ffmpeg_missing"
 
     for vcodec in ("libx264", "mpeg4"):
@@ -133,13 +136,13 @@ def transcode_to_browser_mp4(input_path: str, output_path: str) -> tuple[bool, s
             ]
             subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             ok = bool(os.path.exists(out_path) and int(os.path.getsize(out_path) or 0) > 0)
-            print(f"[VIDEO_TRANSCODE] success={bool(ok)} codec={vcodec} output={out_path}")
+            logger.info("video_transcode success=%s codec=%s output=%s", bool(ok), vcodec, out_path)
             return bool(ok), (None if ok else "transcode_failed")
         except Exception as e:
-            print(f"[VIDEO_TRANSCODE][WARN] codec={vcodec} failed err={str(e) or e.__class__.__name__}")
+            logger.warning("video_transcode codec=%s failed: %s", vcodec, str(e) or e.__class__.__name__)
             continue
 
-    print("[VIDEO_TRANSCODE] success=False")
+    logger.warning("video_transcode success=False")
     return False, "transcode_failed"
 
 
@@ -148,7 +151,7 @@ def make_browser_compatible_mp4(input_path: str, output_path: str) -> tuple[bool
     try:
         return transcode_to_browser_mp4(input_path, output_path)
     except Exception as e:
-        print(f"[VIDEO_TRANSCODE][ERROR] {str(e) or e.__class__.__name__}")
+        logger.error("video_transcode error: %s", str(e) or e.__class__.__name__)
         return False, "exception"
 
 

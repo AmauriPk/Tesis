@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class PTZStateService:
@@ -73,12 +76,12 @@ class PTZStateService:
                 if bbox != self._last_tracking_target_bbox or (now - float(self._last_tracking_target_log_at)) > 1.0:
                     self._last_tracking_target_bbox = bbox
                     self._last_tracking_target_log_at = now
-                    print(
-                        "[TRACKING_TARGET]",
-                        f"bbox={tuple(bbox)} conf={float(payload.get('confidence') or 0.0):.3f} updated=True",
+                    logger.debug(
+                        "tracking_target bbox=%s conf=%.3f updated=True",
+                        tuple(bbox), float(payload.get('confidence') or 0.0),
                     )
         except Exception as e:
-            print(f"[PTZ_STATE][WARN] update_tracking_target err={e}")
+            logger.warning("PTZ state update_tracking_target error: %s", e)
 
     def get_tracking_target_snapshot(self) -> dict:
         with self.tracking_target_lock:

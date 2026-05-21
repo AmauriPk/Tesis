@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import heapq
+import logging
 import os
 import secrets
 import threading
@@ -18,6 +19,8 @@ from werkzeug.utils import secure_filename
 from src.services.video_export_service import create_video_writer, make_browser_compatible_mp4
 from src.system_core import FrameRecord
 from src.video_processor import draw_detections
+
+logger = logging.getLogger(__name__)
 
 analysis_bp = Blueprint("analysis", __name__)
 
@@ -305,7 +308,7 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
     browser_path = os.path.join(_get_dep("app").config["RESULTS_FOLDER"], browser_name)
 
     out, wrote_to, used = create_video_writer(raw_path, fps, width, height)
-    print("[VIDEO_WRITER]", f"raw_path={wrote_to}")
+    logger.debug("video_writer raw_path=%s", wrote_to)
     video_output_warning = None
     if out is None:
         video_output_warning = "No se pudo inicializar VideoWriter; se omitió el video de salida."
@@ -397,7 +400,7 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
         except Exception:
             result_video_size = 0
 
-    print(f"[VIDEO_OUTPUT] raw_path={result_video_path} size={int(result_video_size)}")
+    logger.debug("video_output raw_path=%s size=%s", result_video_path, int(result_video_size))
     if result_video_path and int(result_video_size) <= 0:
         video_output_warning = "No se pudo generar un video reproducible de salida (archivo vacío)."
         result_video_path = None
@@ -421,7 +424,7 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
                 sz = int(os.path.getsize(browser_path) or 0)
             except Exception:
                 sz = 0
-            print(f"[VIDEO_OUTPUT] browser_path={browser_path} size={int(sz)} playable=True")
+            logger.info("video_output browser_path=%s size=%s playable=True", browser_path, int(sz))
         else:
             # Fallback: no tenemos mp4 browser-playable; permitir descarga del raw.
             final_video_path = result_video_path
@@ -438,9 +441,9 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
                     video_output_warning = (
                         "El video fue generado, pero no se pudo convertir a un formato reproducible en navegador. Use Descargar."
                     )
-            print("[VIDEO_OUTPUT][WARN] browser playable mp4 unavailable; download only")
+            logger.warning("video_output browser playable mp4 unavailable; download only")
 
-    print(f"[VIDEO_OUTPUT] playable={bool(final_playable)} mime={final_mime}")
+    logger.debug("video_output playable=%s mime=%s", bool(final_playable), final_mime)
 
     avg_conf = (total_conf / max(1, frame_count)) if frame_count else 0.0
     top_items = sorted(top_heap, key=lambda x: x[0], reverse=True)

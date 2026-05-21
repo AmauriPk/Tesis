@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 _CAMERA_ROOT_PATH: Optional[str] = None
 _last_camera_cfg_is_ptz: Optional[bool] = None
@@ -57,14 +60,14 @@ def leer_config_camara() -> bool:
             data = json.load(f) or {}
         value = bool(data.get("is_ptz", False))
         if debug or (_last_camera_cfg_is_ptz is None) or (bool(_last_camera_cfg_is_ptz) != bool(value)):
-            print(f"[CAMERA_CFG] read {path} -> is_ptz={value}")
+            logger.debug("camera_cfg read %s -> is_ptz=%s", path, value)
         _last_camera_cfg_is_ptz = bool(value)
         return value
     except FileNotFoundError:
-        print(f"[CAMERA_CFG] read {path} -> MISSING (default False)")
+        logger.debug("camera_cfg read %s -> MISSING (default False)", path)
         return False
     except (json.JSONDecodeError, ValueError, KeyError) as e:
-        print(f"[CAMERA_CFG] read {path} -> PARSE ERROR: {e} (default False)")
+        logger.warning("camera_cfg read %s -> PARSE ERROR: %s (default False)", path, e)
         # Fail-safe: ante corrupciones/parcial, asumir fija.
         return False
 
@@ -98,7 +101,7 @@ def set_configured_camera_type(camera_type: str) -> str:
     try:
         guardar_config_camara(ct == "ptz")
     except Exception as e:
-        print(f"[CAMERA_CFG][WARN] guardar_config failed: {e}")
+        logger.warning("camera_cfg guardar_config failed: %s", e)
     return ct
 
 

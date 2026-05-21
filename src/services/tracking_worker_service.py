@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 
 class TrackingPTZWorker:
@@ -46,7 +49,7 @@ class TrackingPTZWorker:
                     if self._was_moving:
                         self._ptz_worker.enqueue_stop()
                         self._was_moving = False
-                        print("[TRACKING_WORKER]", "stop reason=tracking_disabled")
+                        logger.debug("tracking_worker stop reason=tracking_disabled")
                     continue
 
                 snap = self._get_tracking_target_snapshot()
@@ -64,7 +67,7 @@ class TrackingPTZWorker:
                     if self._was_moving:
                         self._ptz_worker.enqueue_stop()
                         self._was_moving = False
-                        print("[TRACKING_WORKER]", f"stop reason=target_lost age={float(age):.2f}")
+                        logger.debug("tracking_worker stop reason=target_lost age=%.2f", float(age))
                     continue
 
                 try:
@@ -206,7 +209,7 @@ class TrackingPTZWorker:
                     if self._was_moving:
                         self._ptz_worker.enqueue_stop()
                         self._was_moving = False
-                        print("[TRACKING_WORKER]", "stop reason=centered")
+                        logger.debug("tracking_worker stop reason=centered")
                     self._last_cmd_at = now
                     continue
 
@@ -225,15 +228,14 @@ class TrackingPTZWorker:
                 self._last_cmd = cmd
                 self._last_cmd_at = now
                 self._was_moving = True
-                print(
-                    "[TRACKING_WORKER]",
-                    f"move pan={float(pan):.3f} tilt={float(tilt):.3f} pan_speed={float(pan_speed):.2f} "
-                    f"tilt_speed={float(tilt_speed):.2f} duration={float(duration_s):.2f} edge_boost={bool(edge_boost_applied)} "
-                    f"reason={reason} age={float(age):.2f}",
+                logger.debug(
+                    "tracking_worker move pan=%.3f tilt=%.3f pan_speed=%.2f tilt_speed=%.2f duration=%.2f edge_boost=%s reason=%s age=%.2f",
+                    float(pan), float(tilt), float(pan_speed), float(tilt_speed),
+                    float(duration_s), bool(edge_boost_applied), reason, float(age),
                 )
             except Exception as e:
                 now = time.time()
                 if (now - float(self._last_error_log_at)) > 2.0:
-                    print(f"[TRACKING_WORKER][ERROR] {e}")
+                    logger.error("tracking_worker error: %s", e)
                     self._last_error_log_at = now
 

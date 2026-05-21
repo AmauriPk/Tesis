@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
 from typing import Any, Callable
 
 from config import _env_float
+
+logger = logging.getLogger(__name__)
 
 
 class _InspectionPatrolWorker:
@@ -118,9 +121,9 @@ class _InspectionPatrolWorker:
                     if self._patrolling and not self._stop_sent_in_pause:
                         self._ptz_worker.enqueue_stop()
                         self._stop_sent_in_pause = True
-                        print(
-                            "[INSPECTION_CMD]",
-                            f"phase=stop paused_by_tracking={bool(paused_by_tracking_target)} paused_by_detection={bool(paused_by_detection)}",
+                        logger.debug(
+                            "inspection_cmd phase=stop paused_by_tracking=%s paused_by_detection=%s",
+                            bool(paused_by_tracking_target), bool(paused_by_detection),
                         )
                     self._patrolling = False
                     self._phase = "move"
@@ -153,16 +156,16 @@ class _InspectionPatrolWorker:
                     self._patrolling = True
                     self._phase = "wait_stop"
                     self._next_action_at = now + float(duration)
-                    print(
-                        "[INSPECTION_CMD]",
-                        f"phase=move mode={mode_txt} direction={'right' if self._dir > 0 else 'left'} x={float(x_speed):.2f} duration={float(duration):.1f}",
+                    logger.debug(
+                        "inspection_cmd phase=move mode=%s direction=%s x=%.2f duration=%.1f",
+                        mode_txt, 'right' if self._dir > 0 else 'left', float(x_speed), float(duration),
                     )
                 elif phase == "wait_stop":
                     self._ptz_worker.enqueue_stop()
                     self._patrolling = False
                     self._phase = "wait_pause"
                     self._next_action_at = now + float(pause)
-                    print("[INSPECTION_CMD]", "phase=stop")
+                    logger.debug("inspection_cmd phase=stop")
                 else:  # wait_pause
                     continuous_360 = (os.environ.get("PTZ_INSPECTION_CONTINUOUS_360") or "1").strip().lower() in {
                         "1",
@@ -176,10 +179,10 @@ class _InspectionPatrolWorker:
                         self._dir = -1.0 * float(self._dir)
                     self._phase = "move"
                     self._next_action_at = 0.0
-                    print(
-                        "[INSPECTION_CMD]",
-                        f"phase=pause_done next_direction={'right' if self._dir > 0 else 'left'}",
+                    logger.debug(
+                        "inspection_cmd phase=pause_done next_direction=%s",
+                        'right' if self._dir > 0 else 'left',
                     )
             except Exception as e:
-                print(f"[INSPECTION_WORKER][ERROR] {e}")
+                logger.error("inspection_worker error: %s", e)
 

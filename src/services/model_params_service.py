@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 
 class ModelParamsService:
@@ -36,6 +39,6 @@ class ModelParamsService:
             raw_dpf = os.environ.get("DETECTION_PERSISTENCE_FRAMES", "3").strip()
             return max(1, int(raw_dpf))
         except (ValueError, TypeError) as e:
-            print(f"[WARN] DETECTION_PERSISTENCE_FRAMES='{raw_dpf}' invalid: {e}, using default=3")
+            logger.warning("DETECTION_PERSISTENCE_FRAMES='%s' invalid: %s, using default=3", raw_dpf, e)
             return 3
 

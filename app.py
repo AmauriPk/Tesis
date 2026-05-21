@@ -12,6 +12,8 @@ Reglas INTRANSFERIBLES (NO eliminar; solo optimizar/refactorizar):
 5) Regla de priorización (Enjambre): el tracking PTZ se centra en el bounding box MÁS GRANDE.
 6) Mitigación de aves: persistencia de frames antes de confirmar una detección.
 """
+import logging
+import logging.handlers
 import os
 import sqlite3
 import secrets
@@ -19,6 +21,34 @@ import threading
 import time
 from datetime import datetime
 from functools import wraps
+
+
+def setup_logging() -> None:
+    log_dir = os.environ.get("LOG_DIR", "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(fmt)
+    fh = logging.handlers.RotatingFileHandler(
+        os.path.join(log_dir, "siran.log"),
+        maxBytes=5 * 1024 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(fmt)
+    root.addHandler(ch)
+    root.addHandler(fh)
+
+setup_logging()
+
+logger = logging.getLogger(__name__)
 
 from flask import (
     Flask,
@@ -80,7 +110,7 @@ app = Flask(__name__)
 _secret_env = (os.environ.get("FLASK_SECRET_KEY") or "").strip()
 if not _secret_env:
     # Fallback solo para desarrollo / demo local. En entornos reales configurar FLASK_SECRET_KEY.
-    print("[SECURITY][WARN] FLASK_SECRET_KEY no configurada; usando clave de desarrollo. No usar así en demo/producción.")
+    logger.warning("FLASK_SECRET_KEY no configurada; usando clave de desarrollo. No usar así en demo/producción.")
     _secret_env = "dev-secret-change-me"
 app.secret_key = _secret_env
 
@@ -244,20 +274,22 @@ def bootstrap_users() -> None:
     admin_pw_env = (os.environ.get("DEFAULT_ADMIN_PASSWORD") or "").strip()
     admin_pw = admin_pw_env or "admin123"
     if not admin_pw_env or admin_pw == "admin123":
-        print(
-            "[SECURITY][WARN] Usando password por defecto para admin. "
-            "Configura DEFAULT_ADMIN_PASSWORD. "
-            f"password_configurada={bool(admin_pw_env)} password_len={len(admin_pw)}"
+        logger.warning(
+            "Usando password por defecto para admin. Configura DEFAULT_ADMIN_PASSWORD. "
+            "password_configurada=%s password_len=%s",
+            bool(admin_pw_env),
+            len(admin_pw),
         )
     admin.set_password(admin_pw)
     operator = User(username="operador", role="operator")
     operator_pw_env = (os.environ.get("DEFAULT_OPERATOR_PASSWORD") or "").strip()
     operator_pw = operator_pw_env or "operador123"
     if not operator_pw_env or operator_pw == "operador123":
-        print(
-            "[SECURITY][WARN] Usando password por defecto para operador. "
-            "Configura DEFAULT_OPERATOR_PASSWORD. "
-            f"password_configurada={bool(operator_pw_env)} password_len={len(operator_pw)}"
+        logger.warning(
+            "Usando password por defecto para operador. Configura DEFAULT_OPERATOR_PASSWORD. "
+            "password_configurada=%s password_len=%s",
+            bool(operator_pw_env),
+            len(operator_pw),
         )
     operator.set_password(operator_pw)
 
@@ -265,9 +297,7 @@ def bootstrap_users() -> None:
     db.session.add(operator)
     db.session.commit()
 
-    print("[BOOTSTRAP] Usuarios creados:")
-    print("  - admin (role=admin)  # password en DEFAULT_ADMIN_PASSWORD")
-    print("  - operador (role=operator)  # password en DEFAULT_OPERATOR_PASSWORD")
+    logger.info("Usuarios creados: admin (role=admin), operador (role=operator)")
 
 # ======================== YOLO MODEL ========================
 _metrics_writer = MetricsDBWriter(
@@ -745,7 +775,7 @@ def api_inspection_test_move():
     configured_ptz = bool(is_camera_configured_ptz())
     ptz_capable = bool(_ptz_discovered_capable())
     ready = bool(is_ptz_ready_for_manual())
-    print("[PTZ_READY]", f"manual={bool(ready)} configured={bool(configured_ptz)} discovered={bool(ptz_capable)}")
+    logger.debug("PTZ ready check: manual=%s configured=%s discovered=%s", bool(ready), bool(configured_ptz), bool(ptz_capable))
     if not ready:
         return jsonify({"ok": False, "error": "PTZ manual bloqueado: la cámara no está configurada como PTZ"}), 403
 
@@ -765,7 +795,7 @@ def api_inspection_test_move():
         return jsonify({"ok": True})
     except Exception as e:
         msg = str(e) or e.__class__.__name__
-        print(f"[PTZ_WORKER][ERROR] source=inspection_test error={msg}")
+        logger.error("PTZ inspection_test error: %s", msg)
         return jsonify({"ok": False, "error": msg}), 500
 
 # ======================== INIT ========================
@@ -775,12 +805,12 @@ with app.app_context():
     try:
         guardar_config_camara((cfg.camera_type or "fixed").strip().lower() == "ptz")
     except Exception as e:
-        print(f"[INIT][WARN] guardar_config_camara failed: {e}")
+        logger.warning("guardar_config_camara failed: %s", e)
     bootstrap_users()
     _probe_onvif_ptz_capability()
 
 if __name__ == "__main__":
-    print(f"[INFO] Servidor: http://localhost:{FLASK_CONFIG['port']}")
+    logger.info("Servidor: http://localhost:%s", FLASK_CONFIG['port'])
     app.run(
         debug=FLASK_CONFIG["debug"],
         use_reloader=bool(FLASK_CONFIG.get("debug")),

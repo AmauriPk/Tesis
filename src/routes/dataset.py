@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 import shutil
@@ -8,6 +9,8 @@ from typing import Any, Callable
 
 from flask import Blueprint, abort, jsonify, request, send_file, url_for
 from flask_login import login_required
+
+logger = logging.getLogger(__name__)
 
 dataset_bp = Blueprint("dataset", __name__)
 
@@ -326,9 +329,9 @@ def init_dataset_routes(**deps: Any) -> None:
         name = (payload.get("name") or "").strip()
 
         if req_path:
-            print("[DATASET_REVERT] requested path=" + str(req_path))
+            logger.debug("dataset_revert requested path=%s", str(req_path))
         elif img_id:
-            print("[DATASET_REVERT] requested id=" + str(img_id))
+            logger.debug("dataset_revert requested id=%s", str(img_id))
 
         if img_id and (":" in img_id) and (not scope or not name):
             try:
@@ -368,12 +371,11 @@ def init_dataset_routes(**deps: Any) -> None:
             return jsonify({"status": "error", "message": "Imagen no encontrada."}), 404
 
         dest = _unique_dest_path(dataset_limpias_inbox_dir, name)
-        print("[DATASET_REVERT] src=" + str(src))
-        print("[DATASET_REVERT] dst=" + str(dest))
+        logger.debug("dataset_revert src=%s dst=%s", str(src), str(dest))
         try:
             shutil.move(src, dest)
         except Exception as e:
-            print("[DATASET_REVERT][ERROR]", str(e) or e.__class__.__name__)
+            logger.error("dataset_revert error: %s", str(e) or e.__class__.__name__)
             return jsonify({"status": "error", "message": f"No se pudo revertir: {str(e)}"}), 500
 
         return jsonify({"status": "success", "moved_to": dest}), 200
