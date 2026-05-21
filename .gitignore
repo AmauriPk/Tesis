@@ -50,6 +50,9 @@ config_camara.json
 instance/
 uploads/
 
+# Dependencias frontend (regenerar con: ver instrucciones en README)
+static/vendor/
+
 # Notas locales
 Indicacion para git.txt
 
