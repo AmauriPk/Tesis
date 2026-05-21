@@ -68,7 +68,7 @@ from flask_login import (
     login_required,
 )
 
-from config import FLASK_CONFIG, ONVIF_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG, _env_float, _env_int
+from config import FLASK_CONFIG, ONVIF_CONFIG, PTZ_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG, _env_float, _env_int
 from src.system_core import CameraConfig, FrameRecord, MetricsDBWriter, PTZController, User, db
 from src.video_processor import LiveStreamDeps, LiveVideoProcessor, RTSPLatestFrameReader
 from src.services.camera_state_service import (
@@ -354,11 +354,7 @@ def _get_tracking_target_snapshot() -> dict:
 def _tracking_target_is_recent() -> tuple[bool, float]:
     snap = _get_tracking_target_snapshot()
     now = time.time()
-    try:
-        ttl = float(os.environ.get("PTZ_TRACKING_TARGET_TTL", "1.5"))
-    except Exception:
-        ttl = 1.5
-    ttl = float(_clamp(ttl, 0.5, 3.0))
+    ttl = float(_clamp(PTZ_CONFIG["target_ttl"], 0.5, 3.0))
     age = now - float(snap.get("updated_at") or 0.0)
     return bool(snap.get("has_target")) and (age <= ttl), float(age)
 
@@ -590,7 +586,7 @@ ptz_worker = PTZCommandWorker(
 ptz_worker.start()
 
 inspection_worker = _InspectionPatrolWorker(
-    idle_s=10.0,
+    idle_s=PTZ_CONFIG["inspection_idle_s"],
     ptz_worker=ptz_worker,
     state_lock=state_lock,
     current_detection_state=current_detection_state,

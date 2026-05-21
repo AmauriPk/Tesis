@@ -6,7 +6,7 @@ import threading
 import time
 from typing import Any, Callable
 
-from config import _env_float
+from config import PTZ_CONFIG, _env_float
 
 logger = logging.getLogger(__name__)
 
@@ -137,14 +137,7 @@ class _InspectionPatrolWorker:
 
                 phase = str(self._phase)
                 if phase == "move":
-                    continuous_360 = (os.environ.get("PTZ_INSPECTION_CONTINUOUS_360") or "1").strip().lower() in {
-                        "1",
-                        "true",
-                        "t",
-                        "yes",
-                        "y",
-                        "on",
-                    }
+                    continuous_360 = bool(PTZ_CONFIG["continuous_360"])
                     mode_txt = "continuous_360" if continuous_360 else "sweep"
                     self._ptz_worker.enqueue_move(
                         x=float(x_speed),
@@ -167,14 +160,7 @@ class _InspectionPatrolWorker:
                     self._next_action_at = now + float(pause)
                     logger.debug("inspection_cmd phase=stop")
                 else:  # wait_pause
-                    continuous_360 = (os.environ.get("PTZ_INSPECTION_CONTINUOUS_360") or "1").strip().lower() in {
-                        "1",
-                        "true",
-                        "t",
-                        "yes",
-                        "y",
-                        "on",
-                    }
+                    continuous_360 = bool(PTZ_CONFIG["continuous_360"])
                     if not continuous_360:
                         self._dir = -1.0 * float(self._dir)
                     self._phase = "move"

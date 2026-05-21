@@ -35,11 +35,27 @@ YOLO_CONFIG = {
 }
 
 # ======================== CONFIGURACIÃ”N PTZ ========================
-# PTZ_K_PAN  (float, default 0.8) — factor proporcional pan:  pan_cmd  = K_pan  * error_x
-# PTZ_K_TILT (float, default 0.8) — factor proporcional tilt: tilt_cmd = K_tilt * error_y
-# Ambos actúan fuera de la deadzone (PTZ_TRACKING_TOLERANCE) y se clampean a
-# [PTZ_TRACKING_MIN_SPEED, PTZ_TRACKING_MAX_SPEED]. Ajustar para controlar
-# agresividad de la corrección: valores > 1.0 amplifican el error (corrección más rápida).
+PTZ_CONFIG = {
+    # Tracking — cuándo y con qué velocidad mover la cámara
+    “target_ttl”:       _env_float(“PTZ_TRACKING_TARGET_TTL”,       3.0),   # RO-04: T=3 s
+    “command_interval”: _env_float(“PTZ_TRACKING_COMMAND_INTERVAL”, 0.35),
+    “max_speed”:        _env_float(“PTZ_TRACKING_MAX_SPEED”,        0.50),
+    “min_speed”:        _env_float(“PTZ_TRACKING_MIN_SPEED”,        0.12),
+    “pan_duration”:     _env_float(“PTZ_TRACKING_PAN_DURATION”,     0.30),
+    “tilt_duration”:    _env_float(“PTZ_TRACKING_TILT_DURATION”,    0.55),
+    “pan_speed”:        _env_float(“PTZ_TRACKING_PAN_SPEED”,        0.35),
+    “tilt_speed”:       _env_float(“PTZ_TRACKING_TILT_SPEED”,       0.45),
+    “tolerance”:        _env_float(“PTZ_TRACKING_TOLERANCE”,        0.18),
+    “edge_tilt_boost”:  _env_float(“PTZ_TRACKING_EDGE_TILT_BOOST”,  1.4),
+    # Proporcionalidad (RO-05): pan_cmd = k_pan * error_x, tilt_cmd = -k_tilt * error_y
+    “k_pan”:            _env_float(“PTZ_K_PAN”,                     0.8),
+    “k_tilt”:           _env_float(“PTZ_K_TILT”,                    0.8),
+    # Inspección / patrullaje automático
+    “inspection_idle_s”: _env_float(“PTZ_INSPECTION_IDLE_S”,        10.0),
+    “continuous_360”:    _env_bool(“PTZ_INSPECTION_CONTINUOUS_360”,  False),
+    # General
+    “ptz_move_duration”: _env_float(“PTZ_MOVE_DURATION”,            0.25),
+}
 
 # ======================== CONFIGURACIÃ”N DE VIDEO ========================
 VIDEO_CONFIG = {
@@ -89,6 +105,7 @@ for _dir in [DATASET_NEGATIVE_DIR, DATASET_POSITIVE_PENDING_DIR, DATASET_LIMPIAS
 __all__ = [
     "FLASK_CONFIG",
     "ONVIF_CONFIG",
+    "PTZ_CONFIG",
     "PROJECT_ROOT",
     "RTSP_CONFIG",
     "STORAGE_CONFIG",

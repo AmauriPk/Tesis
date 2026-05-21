@@ -6,6 +6,8 @@ import threading
 import time
 from typing import Any, Callable
 
+from config import PTZ_CONFIG
+
 logger = logging.getLogger(__name__)
 
 
@@ -55,11 +57,7 @@ class TrackingPTZWorker:
                 snap = self._get_tracking_target_snapshot()
                 now = time.time()
 
-                try:
-                    ttl = float(os.environ.get("PTZ_TRACKING_TARGET_TTL", "1.5"))
-                except Exception:
-                    ttl = 1.5
-                ttl = float(self._clamp(ttl, 0.5, 3.0))
+                ttl = float(self._clamp(PTZ_CONFIG["target_ttl"], 0.5, 3.0))
 
                 has_target = bool(snap.get("has_target")) and bool(snap.get("bbox"))
                 age = now - float(snap.get("updated_at") or 0.0)
@@ -70,67 +68,18 @@ class TrackingPTZWorker:
                         logger.debug("tracking_worker stop reason=target_lost age=%.2f", float(age))
                     continue
 
-                try:
-                    command_interval = float(os.environ.get("PTZ_TRACKING_COMMAND_INTERVAL", "0.35"))
-                except Exception:
-                    command_interval = 0.35
-                command_interval = float(self._clamp(command_interval, 0.20, 1.00))
+                command_interval = float(self._clamp(PTZ_CONFIG["command_interval"], 0.20, 1.00))
                 if (now - float(self._last_cmd_at)) < float(command_interval):
                     continue
 
-                try:
-                    max_speed = float(os.environ.get("PTZ_TRACKING_MAX_SPEED", "0.50"))
-                except Exception:
-                    max_speed = 0.50
-                max_speed = float(self._clamp(max_speed, 0.10, 0.70))
-
-                try:
-                    min_speed = float(os.environ.get("PTZ_TRACKING_MIN_SPEED", "0.12"))
-                except Exception:
-                    min_speed = 0.12
-                min_speed = float(self._clamp(min_speed, 0.05, 0.30))
-
-                try:
-                    pan_duration = float(
-                        os.environ.get("PTZ_TRACKING_PAN_DURATION", os.environ.get("PTZ_TRACKING_DURATION", "0.30"))
-                    )
-                except Exception:
-                    pan_duration = 0.30
-                pan_duration = float(self._clamp(pan_duration, 0.10, 1.00))
-
-                try:
-                    tilt_duration = float(
-                        os.environ.get("PTZ_TRACKING_TILT_DURATION", os.environ.get("PTZ_TRACKING_DURATION", "0.55"))
-                    )
-                except Exception:
-                    tilt_duration = 0.55
-                tilt_duration = float(self._clamp(tilt_duration, 0.10, 1.50))
-
-                try:
-                    pan_speed = float(os.environ.get("PTZ_TRACKING_PAN_SPEED", os.environ.get("PTZ_TRACKING_SPEED", "0.35")))
-                except Exception:
-                    pan_speed = 0.35
-                pan_speed = float(self._clamp(pan_speed, 0.05, 0.80))
-
-                try:
-                    tilt_speed = float(
-                        os.environ.get("PTZ_TRACKING_TILT_SPEED", os.environ.get("PTZ_TRACKING_SPEED", "0.45"))
-                    )
-                except Exception:
-                    tilt_speed = 0.45
-                tilt_speed = float(self._clamp(tilt_speed, 0.05, 0.95))
-
-                try:
-                    tolerance_frac = float(os.environ.get("PTZ_TRACKING_TOLERANCE", "0.18"))
-                except Exception:
-                    tolerance_frac = 0.18
-                tolerance_frac = float(self._clamp(tolerance_frac, 0.05, 0.45))
-
-                try:
-                    edge_tilt_boost = float(os.environ.get("PTZ_TRACKING_EDGE_TILT_BOOST", "1.8"))
-                except Exception:
-                    edge_tilt_boost = 1.8
-                edge_tilt_boost = float(self._clamp(edge_tilt_boost, 1.0, 3.0))
+                max_speed     = float(self._clamp(PTZ_CONFIG["max_speed"],      0.10, 0.70))
+                min_speed     = float(self._clamp(PTZ_CONFIG["min_speed"],      0.05, 0.30))
+                pan_duration  = float(self._clamp(PTZ_CONFIG["pan_duration"],   0.10, 1.00))
+                tilt_duration = float(self._clamp(PTZ_CONFIG["tilt_duration"],  0.10, 1.50))
+                pan_speed     = float(self._clamp(PTZ_CONFIG["pan_speed"],      0.05, 0.80))
+                tilt_speed    = float(self._clamp(PTZ_CONFIG["tilt_speed"],     0.05, 0.95))
+                tolerance_frac = float(self._clamp(PTZ_CONFIG["tolerance"],     0.05, 0.45))
+                edge_tilt_boost = float(self._clamp(PTZ_CONFIG["edge_tilt_boost"], 1.0, 3.0))
 
                 bbox = snap.get("bbox") or []
                 fw = int(snap.get("frame_w") or 0)
@@ -151,14 +100,8 @@ class TrackingPTZWorker:
                 bottom_edge = float(y2) >= float(fh) * 0.95
                 edge_boost_applied = False
 
-                try:
-                    k_pan = float(os.environ.get("PTZ_K_PAN", "0.8"))
-                except Exception:
-                    k_pan = 0.8
-                try:
-                    k_tilt = float(os.environ.get("PTZ_K_TILT", "0.8"))
-                except Exception:
-                    k_tilt = 0.8
+                k_pan  = float(PTZ_CONFIG["k_pan"])
+                k_tilt = float(PTZ_CONFIG["k_tilt"])
 
                 # Error normalizado [-0.5, 0.5]: (0,0) = centro del frame
                 error_x = (cx / float(fw)) - 0.5

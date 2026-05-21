@@ -18,6 +18,7 @@ from typing import Any, Callable, Optional
 import cv2
 import numpy as np
 
+from config import PTZ_CONFIG
 from src.system_core import clamp, select_priority_detection
 
 logger = logging.getLogger(__name__)
@@ -171,18 +172,9 @@ def ptz_centering_vector(
 
     spd = float(abs(float(max_speed)))
 
-    try:
-        k_pan = float(os.environ.get("PTZ_K_PAN", "0.8"))
-    except Exception:
-        k_pan = 0.8
-    try:
-        k_tilt = float(os.environ.get("PTZ_K_TILT", "0.8"))
-    except Exception:
-        k_tilt = 0.8
-    try:
-        min_spd = float(os.environ.get("PTZ_TRACKING_MIN_SPEED", "0.12"))
-    except Exception:
-        min_spd = 0.12
+    k_pan   = float(PTZ_CONFIG["k_pan"])
+    k_tilt  = float(PTZ_CONFIG["k_tilt"])
+    min_spd = float(PTZ_CONFIG["min_speed"])
 
     # Error normalizado [-0.5, 0.5]: (0,0) = centro del frame
     error_x = (cx / float(fw)) - 0.5
