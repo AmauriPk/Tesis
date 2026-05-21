@@ -14,7 +14,7 @@ RTSP_CONFIG = {
     "url": os.environ.get("RTSP_URL", "0"),
     "username": os.environ.get("RTSP_USERNAME", "usuario"),
     "password": os.environ.get("RTSP_PASSWORD", "password"),
-    "timeout": _env_int("RTSP_TIMEOUT", 10),
+    "timeout": _env_int("RTSP_TIMEOUT", 5),    # RF-01: conexión en < 5 s
     "buffer_size": _env_int("RTSP_BUFFER_SIZE", 1),
 }
 
@@ -45,7 +45,7 @@ PTZ_CONFIG = {
     “tilt_duration”:    _env_float(“PTZ_TRACKING_TILT_DURATION”,    0.55),
     “pan_speed”:        _env_float(“PTZ_TRACKING_PAN_SPEED”,        0.35),
     “tilt_speed”:       _env_float(“PTZ_TRACKING_TILT_SPEED”,       0.45),
-    “tolerance”:        _env_float(“PTZ_TRACKING_TOLERANCE”,        0.18),
+    “tolerance”:        _env_float(“PTZ_TRACKING_TOLERANCE”,        0.15),  # RO-03: zona central 30% = ±15%
     “edge_tilt_boost”:  _env_float(“PTZ_TRACKING_EDGE_TILT_BOOST”,  1.4),
     # Proporcionalidad (RO-05): pan_cmd = k_pan * error_x, tilt_cmd = -k_tilt * error_y
     “k_pan”:            _env_float(“PTZ_K_PAN”,                     0.8),
