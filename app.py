@@ -106,7 +106,7 @@ app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", ""
 }
 
 if FLASK_CONFIG.get("debug"):
-    # En desarrollo: recargar templates y evitar caché agresiva de estáticos.
+    # En asdasdasdasddesarrollo: recargar templates y evitar caché agresiva de estáticos.
     app.config["TEMPLATES_AUTO_RELOAD"] = True
     app.jinja_env.auto_reload = True
     app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
