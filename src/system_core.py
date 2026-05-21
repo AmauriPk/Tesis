@@ -17,7 +17,26 @@ logger = logging.getLogger(__name__)
 
 from flask_login import UserMixin
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import TypeDecorator, String as _SAString
 from werkzeug.security import check_password_hash, generate_password_hash
+
+from src.services.crypto_service import decrypt as _decrypt, encrypt as _encrypt
+
+
+class _EncryptedString(TypeDecorator):
+    """Cifra en escritura y descifra en lectura de forma transparente."""
+    impl = _SAString
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        return _encrypt(str(value))
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        return _decrypt(str(value))
 
 
 # ======================== ENTORNO / UTILIDADES ========================
@@ -109,12 +128,12 @@ class CameraConfig(db.Model):
 
     rtsp_url = db.Column(db.String(500), nullable=True)
     rtsp_username = db.Column(db.String(120), nullable=True)
-    rtsp_password = db.Column(db.String(120), nullable=True)
+    rtsp_password = db.Column(_EncryptedString(500), nullable=True)
 
     onvif_host = db.Column(db.String(120), nullable=True)
     onvif_port = db.Column(db.Integer, nullable=False, default=80)
     onvif_username = db.Column(db.String(120), nullable=True)
-    onvif_password = db.Column(db.String(120), nullable=True)
+    onvif_password = db.Column(_EncryptedString(500), nullable=True)
 
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 

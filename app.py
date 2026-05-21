@@ -16,6 +16,7 @@ import logging
 import logging.handlers
 import os
 import sqlite3
+import secrets
 import threading
 import time
 from datetime import datetime
@@ -105,12 +106,21 @@ from src.routes.media import media_bp, init_media_routes
 
 # ======================== APP / DB ========================
 app = Flask(__name__)
-_secret_env = (os.environ.get("FLASK_SECRET_KEY") or "").strip()
-if not _secret_env:
-    # Fallback solo para desarrollo / demo local. En entornos reales configurar FLASK_SECRET_KEY.
-    logger.warning("FLASK_SECRET_KEY no configurada; usando clave de desarrollo. No usar así en demo/producción.")
-    _secret_env = "dev-secret-change-me"
-app.secret_key = _secret_env
+
+_secret_key_file = os.path.join("instance", ".secret_key")
+
+def _load_or_create_secret_key() -> str:
+    if os.path.exists(_secret_key_file):
+        with open(_secret_key_file, "r") as f:
+            return f.read().strip()
+    key = secrets.token_hex(32)
+    os.makedirs("instance", exist_ok=True)
+    with open(_secret_key_file, "w") as f:
+        f.write(key)
+    logger.info("FLASK_SECRET_KEY generada y guardada en %s", _secret_key_file)
+    return key
+
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or _load_or_create_secret_key()
 
 # Identificador volátil por arranque: invalida cookies/sesiones previas tras reinicio.
 session_security_service = SessionSecurityService()
@@ -737,6 +747,22 @@ def api_inspection_test_move():
         msg = str(e) or e.__class__.__name__
         logger.error("PTZ inspection_test error: %s", msg)
         return jsonify({"ok": False, "error": msg}), 500
+
+# ======================== SECURITY HEADERS ========================
+@app.after_request
+def set_security_headers(response):
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self'"
+    )
+    return response
 
 # ======================== INIT ========================
 with app.app_context():
