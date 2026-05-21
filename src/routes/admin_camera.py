@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 import cv2
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import login_required
+from src.routes import get_dep
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +20,7 @@ _deps: dict[str, Any] = {}
 _routes_initialized = False
 
 
-def _get_dep(key: str):
-    try:
-        return _deps[key]
-    except KeyError as exc:
-        raise RuntimeError(f"Dependencia faltante en admin_camera: {key}") from exc
+def _get_dep(key: str): return get_dep(_deps, key)
 
 
 def init_admin_camera_routes(**deps: Any) -> None:

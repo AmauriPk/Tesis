@@ -16,7 +16,6 @@ import logging
 import logging.handlers
 import os
 import sqlite3
-import secrets
 import threading
 import time
 from datetime import datetime
@@ -55,7 +54,6 @@ from flask import (
     abort,
     flash,
     jsonify,
-    send_file,
     redirect,
     request,
     session,
@@ -166,7 +164,7 @@ DATASET_POSITIVE_PENDING_DIR = os.path.join(DATASET_TRAINING_ROOT, "pending", "i
 os.makedirs(DATASET_NEGATIVE_DIR, exist_ok=True)
 os.makedirs(DATASET_POSITIVE_PENDING_DIR, exist_ok=True)
 
-# Inbox "limpias" a nivel raÃ­z para revertir reclasificaciones.
+# Inbox "limpias" a nivel raíz para revertir reclasificaciones.
 DATASET_LIMPIAS_INBOX_DIR = os.path.join(app.config["DATASET_RECOLECCION_FOLDER"], "limpias")
 os.makedirs(DATASET_LIMPIAS_INBOX_DIR, exist_ok=True)
 
@@ -332,16 +330,14 @@ yolo_model = load_yolo_model(YOLO_CONFIG)
 ptz_state_service = PTZStateService()
 state_lock = ptz_state_service.state_lock
 
-camera_source_mode = "fixed"  # fixed | ptz (autodescubrimiento ONVIF)
-
 # ======================== MODEL PARAMS (Admin RBAC) ========================
-# ParametrizaciÃ³n operativa ajustable en procesamiento de flujo (Admin).
+# Parametrización operativa ajustable en procesamiento de flujo (Admin).
 model_params_service = ModelParamsService(env_float=_env_float, env_int=_env_int)
 model_params_lock = model_params_service.lock
 
 # ======================== CONFIGURED HW STATE (Admin) ========================
-# Fuente de verdad de negocio: lo que el Administrador dejÃ³ configurado.
-# Esto NO hace ping a la cÃ¡mara: sÃ³lo refleja configuraciÃ³n persistida / Ãºltimo test admin.
+# Fuente de verdad de negocio: lo que el Administrador dejó configurado.
+# Esto NO hace ping a la cámara: sólo refleja configuración persistida / último test admin.
 
 def _update_tracking_target(payload: dict) -> None:
     ptz_state_service.update_tracking_target(payload)
@@ -364,7 +360,7 @@ MODEL_PARAMS = model_params_service.model_params
 
 def get_model_params() -> dict:
     """
-    Devuelve una copia de los parÃ¡metros operativos del modelo.
+    Devuelve una copia de los parámetros operativos del modelo.
 
     Returns:
         Diccionario con llaves como `confidence_threshold`, `persistence_frames`, `iou_threshold`.
@@ -373,18 +369,18 @@ def get_model_params() -> dict:
 
 def update_model_params(*, confidence_threshold: float, persistence_frames: int, iou_threshold: float) -> dict:
     """
-    Actualiza parÃ¡metros operativos del modelo en memoria (hot update).
+    Actualiza parámetros operativos del modelo en memoria (hot update).
 
-    AdemÃ¡s sincroniza `DETECTION_PERSISTENCE_FRAMES`, que se usa para mostrar el estado
+    Además sincroniza `DETECTION_PERSISTENCE_FRAMES`, que se usa para mostrar el estado
     de persistencia en la UI (sin necesidad de reiniciar el servidor).
 
     Args:
         confidence_threshold: Umbral de confianza para YOLO.
-        persistence_frames: Frames consecutivos requeridos para confirmar detecciÃ³n.
+        persistence_frames: Frames consecutivos requeridos para confirmar detección.
         iou_threshold: Umbral de IOU para YOLO.
 
     Returns:
-        Copia actualizada de los parÃ¡metros del modelo.
+        Copia actualizada de los parámetros del modelo.
     """
     global DETECTION_PERSISTENCE_FRAMES
     updated = model_params_service.update_model_params(
@@ -395,7 +391,7 @@ def update_model_params(*, confidence_threshold: float, persistence_frames: int,
     try:
         DETECTION_PERSISTENCE_FRAMES = int(updated["persistence_frames"])
     except Exception:
-        # NOTE: Idealmente capturar (TypeError, ValueError) si se esperan problemas de conversiÃ³n.
+        # NOTE: Idealmente capturar (TypeError, ValueError) si se esperan problemas de conversión.
         pass
     return dict(updated)
 
@@ -407,13 +403,7 @@ try:
 except Exception:
     DETECTION_PERSISTENCE_FRAMES = 3
 
-# Autodescubrimiento de hardware (NO confiar en selector manual).
-is_ptz_capable = False
 last_confirmed_detection_at: float | None = None
-_onvif_last_probe_at: float | None = None
-_onvif_last_probe_error: str | None = None
-_last_ptz_ready_automation: bool | None = None
-_last_ptz_ready_manual: bool | None = None
 
 
 def set_auto_tracking_enabled(value: bool) -> None:
@@ -441,7 +431,7 @@ current_detection_state = {
     "detected": False,
     "last_update": None,
     "detection_count": 0,
-    "camera_source_mode": camera_source_mode,
+    "camera_source_mode": "fixed",
 }
 
 ptz_capability_service = PTZCapabilityService(
@@ -453,16 +443,6 @@ ptz_capability_service = PTZCapabilityService(
     get_or_create_camera_config=get_or_create_camera_config,
     normalized_onvif_port=_normalized_onvif_port,
 )
-# Sincroniza estado inicial (compatibilidad con variables globales existentes).
-ptz_capability_service.is_ptz_capable = bool(is_ptz_capable)
-ptz_capability_service.camera_source_mode = str(camera_source_mode)
-ptz_capability_service.onvif_last_probe_at = _onvif_last_probe_at
-ptz_capability_service.onvif_last_probe_error = _onvif_last_probe_error
-ptz_capability_service.last_ptz_ready_automation = _last_ptz_ready_automation
-ptz_capability_service.last_ptz_ready_manual = _last_ptz_ready_manual
-
-def _get_camera_source_mode() -> str:
-    return ptz_capability_service.get_camera_source_mode()
 
 
 init_analysis_routes(
@@ -474,7 +454,7 @@ init_analysis_routes(
     allowed_file=allowed_file,
     get_model_params=get_model_params,
     state_lock=state_lock,
-    get_camera_source_mode=_get_camera_source_mode,
+    get_camera_source_mode=ptz_capability_service.get_camera_source_mode,
     role_required=role_required,
 )
 app.register_blueprint(analysis_bp)
@@ -517,12 +497,7 @@ def _set_ptz_capable(value: bool, *, error: str | None = None) -> None:
     - Si el hardware NO es PTZ: se deshabilita `auto_tracking_enabled` por seguridad.
     - Esto es parte del "bloqueo de rutas de movimiento" cuando la cámara es fija.
     """
-    global is_ptz_capable, camera_source_mode, _onvif_last_probe_error
     ptz_capability_service.set_ptz_capable(bool(value), error=error)
-    # Mantener compatibilidad con variables globales usadas en otros bloques.
-    is_ptz_capable = bool(ptz_capability_service.is_ptz_capable)
-    camera_source_mode = str(ptz_capability_service.camera_source_mode)
-    _onvif_last_probe_error = ptz_capability_service.onvif_last_probe_error
 
 def _probe_onvif_ptz_capability() -> bool:
     """
@@ -530,14 +505,8 @@ def _probe_onvif_ptz_capability() -> bool:
     - Si existe Capabilities.PTZ (XAddr) o el servicio PTZ responde, es PTZ.
     - Si falla cualquier paso (incl. conexión/credenciales), se asume Fija.
     """
-    global _onvif_last_probe_at, _onvif_last_probe_error, is_ptz_capable, camera_source_mode
     with app.app_context():
         ok = bool(ptz_capability_service.probe_onvif_ptz_capability())
-    # Mantener compatibilidad con variables globales usadas en otros bloques.
-    _onvif_last_probe_at = ptz_capability_service.onvif_last_probe_at
-    _onvif_last_probe_error = ptz_capability_service.onvif_last_probe_error
-    is_ptz_capable = bool(ptz_capability_service.is_ptz_capable)
-    camera_source_mode = str(ptz_capability_service.camera_source_mode)
     return bool(ok)
 
 init_admin_camera_routes(
@@ -551,31 +520,6 @@ init_admin_camera_routes(
     get_model_params=get_model_params,
 )
 app.register_blueprint(admin_camera_bp)
-
-# ======================== PTZ READYNESS HELPERS ========================
-def _ptz_discovered_capable() -> bool:
-    return bool(ptz_capability_service.ptz_discovered_capable())
-
-
-def _should_log_ptz_ready() -> bool:
-    return bool(ptz_capability_service.should_log_ptz_ready())
-
-
-def _log_ptz_ready(*, kind: str, ready: bool, configured: bool, discovered: bool) -> None:
-    global _last_ptz_ready_automation, _last_ptz_ready_manual
-    ptz_capability_service.log_ptz_ready(kind=kind, ready=ready, configured=configured, discovered=discovered)
-    # Mantener compatibilidad con variables globales cacheadas.
-    _last_ptz_ready_automation = ptz_capability_service.last_ptz_ready_automation
-    _last_ptz_ready_manual = ptz_capability_service.last_ptz_ready_manual
-
-
-def is_ptz_ready_for_manual() -> bool:
-    return bool(ptz_capability_service.is_ptz_ready_for_manual())
-
-
-def is_ptz_ready_for_automation() -> bool:
-    return bool(ptz_capability_service.is_ptz_ready_for_automation())
-
 
 ptz_worker = PTZCommandWorker(
     app=app,
@@ -593,7 +537,7 @@ inspection_worker = _InspectionPatrolWorker(
     get_inspection_mode_enabled=get_inspection_mode_enabled,
     set_inspection_mode_enabled=set_inspection_mode_enabled,
     get_auto_tracking_enabled=get_auto_tracking_enabled,
-    is_ptz_ready_for_automation=is_ptz_ready_for_automation,
+    is_ptz_ready_for_automation=ptz_capability_service.is_ptz_ready_for_automation,
     tracking_target_is_recent=_tracking_target_is_recent,
     clamp=_clamp,
 )
@@ -603,7 +547,7 @@ tracking_worker = TrackingPTZWorker(
     state_lock=state_lock,
     ptz_worker=ptz_worker,
     get_auto_tracking_enabled=get_auto_tracking_enabled,
-    is_ptz_ready_for_automation=is_ptz_ready_for_automation,
+    is_ptz_ready_for_automation=ptz_capability_service.is_ptz_ready_for_automation,
     get_tracking_target_snapshot=_get_tracking_target_snapshot,
     clamp=_clamp,
 )
@@ -644,8 +588,8 @@ live_processor = LiveVideoProcessor(
     get_model_params=get_model_params,
     metrics_enqueue=_metrics_enqueue_with_events,
     make_frame_record=FrameRecord,
-    get_camera_mode=lambda: str(camera_source_mode),
-    is_tracking_enabled=lambda: bool(get_auto_tracking_enabled()) and bool(is_ptz_ready_for_automation()),
+    get_camera_mode=lambda: ptz_capability_service.get_camera_source_mode(),
+    is_tracking_enabled=lambda: bool(get_auto_tracking_enabled()) and bool(ptz_capability_service.is_ptz_ready_for_automation()),
     is_camera_configured_ptz=is_camera_configured_ptz,
     ptz_move=_ptz_tracking_move,
     ptz_stop=ptz_worker.enqueue_stop,
@@ -732,7 +676,7 @@ init_automation_routes(
     tracking_target_lock=tracking_target_lock,
     ptz_worker=ptz_worker,
     is_camera_configured_ptz=is_camera_configured_ptz,
-    is_ptz_ready_for_automation=is_ptz_ready_for_automation,
+    is_ptz_ready_for_automation=ptz_capability_service.is_ptz_ready_for_automation,
     get_auto_tracking_enabled=get_auto_tracking_enabled,
     set_auto_tracking_enabled=set_auto_tracking_enabled,
     get_inspection_mode_enabled=get_inspection_mode_enabled,
@@ -750,8 +694,8 @@ init_ptz_manual_routes(
     tracking_target_state=tracking_target_state,
     tracking_target_lock=tracking_target_lock,
     is_camera_configured_ptz=is_camera_configured_ptz,
-    ptz_discovered_capable=_ptz_discovered_capable,
-    is_ptz_ready_for_manual=is_ptz_ready_for_manual,
+    ptz_discovered_capable=ptz_capability_service.ptz_discovered_capable,
+    is_ptz_ready_for_manual=ptz_capability_service.is_ptz_ready_for_manual,
     get_or_create_camera_config=get_or_create_camera_config,
     normalized_onvif_port=_normalized_onvif_port,
     clamp=_clamp,
@@ -769,8 +713,8 @@ def api_inspection_test_move():
     Útil para diagnosticar si el problema está en el worker/cola o en el control ONVIF.
     """
     configured_ptz = bool(is_camera_configured_ptz())
-    ptz_capable = bool(_ptz_discovered_capable())
-    ready = bool(is_ptz_ready_for_manual())
+    ptz_capable = bool(ptz_capability_service.ptz_discovered_capable())
+    ready = bool(ptz_capability_service.is_ptz_ready_for_manual())
     logger.debug("PTZ ready check: manual=%s configured=%s discovered=%s", bool(ready), bool(configured_ptz), bool(ptz_capable))
     if not ready:
         return jsonify({"ok": False, "error": "PTZ manual bloqueado: la cámara no está configurada como PTZ"}), 403

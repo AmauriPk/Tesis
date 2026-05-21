@@ -69,11 +69,6 @@ def safe_join_path(*parts: str) -> str:
     return normalized.replace("\\", "/")
 
 
-def validate_bbox(bbox: tuple[int, int, int, int]) -> bool:
-    x1, y1, x2, y2 = bbox
-    return int(x1) < int(x2) and int(y1) < int(y2)
-
-
 def bbox_area(bbox: tuple[int, int, int, int]) -> int:
     x1, y1, x2, y2 = bbox
     return max(0, int(x2) - int(x1)) * max(0, int(y2) - int(y1))
@@ -83,36 +78,6 @@ def select_priority_detection(detection_list: list[dict[str, Any]]) -> dict[str,
     if not detection_list:
         return None
     return max(detection_list, key=lambda d: bbox_area(tuple(d["bbox"])))
-
-
-def normalize_url_with_credentials(
-    base_url: str,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-) -> str:
-    if not base_url or "://" not in base_url:
-        return base_url
-    if "@" in base_url:
-        return base_url
-    if username and password:
-        scheme, rest = base_url.split("://", 1)
-        return f"{scheme}://{username}:{password}@{rest}"
-    return base_url
-
-
-def graceful_shutdown_handler(stop_signals: list) -> None:
-    for signal_obj in stop_signals:
-        if hasattr(signal_obj, "set"):
-            signal_obj.set()
-
-
-def should_allow_ptz_move(*, is_ptz_capable: bool) -> bool:
-    return bool(is_ptz_capable)
-
-
-def assert_ptz_capable(*, is_ptz_capable: bool) -> None:
-    if not should_allow_ptz_move(is_ptz_capable=is_ptz_capable):
-        raise PermissionError("PTZ no disponible (fail-safe ONVIF: cÃ¡mara fija).")
 
 
 # ======================== DB (SQLAlchemy) ========================

@@ -16,6 +16,7 @@ from flask import Blueprint, jsonify, request
 from flask_login import login_required
 from werkzeug.utils import secure_filename
 
+from src.routes import get_dep
 from src.services.video_export_service import create_video_writer, make_browser_compatible_mp4
 from src.system_core import FrameRecord
 from src.video_processor import draw_detections
@@ -27,12 +28,7 @@ analysis_bp = Blueprint("analysis", __name__)
 _deps: dict[str, Any] = {}
 _routes_initialized = False
 
-# Helper para errores claros cuando falten dependencias inyectadas.
-def _get_dep(key: str):
-    try:
-        return _deps[key]
-    except KeyError as exc:
-        raise RuntimeError(f"Dependencia faltante en analysis: {key}") from exc
+def _get_dep(key: str): return get_dep(_deps, key)
 
 # Estado de jobs de inferencia manual (solo usado por /upload_detect y /video_progress).
 job_lock = threading.Lock()

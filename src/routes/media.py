@@ -6,6 +6,7 @@ from typing import Any
 from flask import Blueprint, abort, current_app, send_file
 from flask_login import login_required
 
+from src.routes import get_dep
 from src.services.media_service import safe_join, safe_rel_path
 
 media_bp = Blueprint("media", __name__)
@@ -14,11 +15,7 @@ _deps: dict[str, Any] = {}
 _routes_initialized = False
 
 
-def _get_dep(key: str):
-    try:
-        return _deps[key]
-    except KeyError as exc:
-        raise RuntimeError(f"Dependencia faltante en media: {key}") from exc
+def _get_dep(key: str): return get_dep(_deps, key)
 
 
 def init_media_routes(**deps: Any) -> None:

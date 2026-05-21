@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
+from src.routes import get_dep
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -19,11 +20,7 @@ _login_attempts: dict[str, dict[str, Any]] = {}
 _login_attempts_lock = threading.Lock()
 
 
-def _get_dep(key: str):
-    try:
-        return _deps[key]
-    except KeyError as exc:
-        raise RuntimeError(f"Dependencia faltante en auth: {key}") from exc
+def _get_dep(key: str): return get_dep(_deps, key)
 
 
 def _client_ip() -> str:

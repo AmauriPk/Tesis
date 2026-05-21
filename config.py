@@ -95,13 +95,6 @@ DATASET_RECOLECCION_FOLDER = STORAGE_CONFIG.get("dataset_recoleccion_folder") or
 )
 DATASET_LIMPIAS_INBOX_DIR = os.path.join(DATASET_RECOLECCION_FOLDER, "limpias")
 
-# Crear directorios si no existen
-for _dir in [DATASET_NEGATIVE_DIR, DATASET_POSITIVE_PENDING_DIR, DATASET_LIMPIAS_INBOX_DIR]:
-    try:
-        os.makedirs(_dir, exist_ok=True)
-    except Exception:
-        pass
-
 __all__ = [
     "FLASK_CONFIG",
     "ONVIF_CONFIG",
