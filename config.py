@@ -67,6 +67,10 @@ PTZ_CONFIG = {
     "reacq_speed":      _env_float("PTZ_REACQ_SPEED",    0.20),   # velocidad suave
     "reacq_pulse_s":    _env_float("PTZ_REACQ_PULSE_S",  0.40),   # duración de cada pulso
     "reacq_pause_s":    _env_float("PTZ_REACQ_PAUSE_S",  0.20),   # pausa entre pulsos
+    # Continuidad IoU entre frames (RO-06): evita movimientos bruscos por falsos positivos
+    "iou_continuity_enabled": _env_bool("PTZ_IOU_CONTINUITY",      True),
+    "iou_continuity_min":     _env_float("PTZ_IOU_CONTINUITY_MIN",  0.50),  # RO-06
+    "iou_continuity_misses":  _env_int("PTZ_IOU_CONTINUITY_MISSES", 3),    # frames consecutivos antes de readquisición
 }
 
 # ======================== CONFIGURACIÃ"N DE VIDEO ========================

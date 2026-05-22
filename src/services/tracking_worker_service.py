@@ -7,6 +7,7 @@ import time
 from typing import Any, Callable
 
 from config import PTZ_CONFIG
+from src.video_processor import bbox_iou_xyxy
 
 logger = logging.getLogger(__name__)
 
@@ -93,19 +94,29 @@ class TrackingPTZWorker:
         self._last_error_log_at = 0.0
         self._reacq: ReacquisitionPattern | None = None
         self._reacq_log_done = False  # True = reacq agotada; previene reinicio hasta recuperar target
+        self._prev_bbox: tuple | None = None       # bbox del frame anterior (x1,y1,x2,y2)
+        self._discontinuity_count: int = 0         # frames consecutivos con IoU bajo
 
     def start(self):
         if not self._thread.is_alive():
             self._thread.start()
 
     def get_reacq_state(self) -> dict:
-        """Estado de readquisición para exposición en métricas."""
+        """Estado de readquisición e IoU para exposición en métricas."""
         reacq = self._reacq
         if reacq is None:
-            return {"ptz_reacquiring": False, "ptz_reacq_remaining_s": 0.0}
-        elapsed = time.time() - reacq._started_at
-        remaining = round(max(0.0, reacq.total_s - elapsed), 1)
-        return {"ptz_reacquiring": not reacq.expired, "ptz_reacq_remaining_s": remaining}
+            reacquiring = False
+            remaining = 0.0
+        else:
+            elapsed = time.time() - reacq._started_at
+            remaining = round(max(0.0, reacq.total_s - elapsed), 1)
+            reacquiring = not reacq.expired
+        return {
+            "ptz_reacquiring":         reacquiring,
+            "ptz_reacq_remaining_s":   remaining,
+            "iou_continuity_ok":       self._discontinuity_count == 0,
+            "iou_discontinuity_count": self._discontinuity_count,
+        }
 
     def _run(self):
         while not self._stop.is_set():
@@ -151,6 +162,8 @@ class TrackingPTZWorker:
                                     logger.warning("PTZ readquisición agotada — target no recuperado")
                                     self._reacq_log_done = True
                                 self._reacq = None
+                                self._prev_bbox = None
+                                self._discontinuity_count = 0
                                 if self._was_moving:
                                     self._ptz_worker.enqueue_stop()
                                     self._was_moving = False
@@ -186,6 +199,8 @@ class TrackingPTZWorker:
                     logger.info("PTZ target recuperado — readquisición cancelada")
                     self._reacq = None
                     self._reacq_log_done = False
+                self._prev_bbox = None
+                self._discontinuity_count = 0
 
                 command_interval = float(self._clamp(PTZ_CONFIG["command_interval"], 0.20, 1.00))
                 if (now - float(self._last_cmd_at)) < float(command_interval):
@@ -204,6 +219,42 @@ class TrackingPTZWorker:
                 fw = int(snap.get("frame_w") or 0)
                 fh = int(snap.get("frame_h") or 0)
                 if fw <= 0 or fh <= 0 or not bbox or len(bbox) != 4:
+                    continue
+
+                # RO-06: validación de continuidad IoU entre frames consecutivos
+                current_bbox_t = tuple(int(v) for v in bbox)
+                iou_ok = True
+                if bool(PTZ_CONFIG.get("iou_continuity_enabled", True)) and self._prev_bbox is not None:
+                    iou = bbox_iou_xyxy(self._prev_bbox, current_bbox_t)
+                    iou_min = float(PTZ_CONFIG["iou_continuity_min"])
+                    if iou < iou_min:
+                        self._discontinuity_count += 1
+                        max_misses = int(PTZ_CONFIG["iou_continuity_misses"])
+                        logger.debug(
+                            "PTZ IoU bajo (%.3f < %.2f) — discontinuidad %d/%d",
+                            iou, iou_min, self._discontinuity_count, max_misses,
+                        )
+                        if self._discontinuity_count >= max_misses:
+                            logger.warning(
+                                "PTZ continuidad perdida — %d frames con IoU < %.2f, iniciando readquisición",
+                                self._discontinuity_count, iou_min,
+                            )
+                            self._discontinuity_count = 0
+                            self._prev_bbox = None
+                            self._reacq = None
+                            self._reacq_log_done = False
+                            if self._was_moving:
+                                self._ptz_worker.enqueue_stop()
+                                self._was_moving = False
+                            continue
+                        iou_ok = False
+                    else:
+                        self._discontinuity_count = 0
+
+                if iou_ok:
+                    self._prev_bbox = current_bbox_t
+
+                if not iou_ok:
                     continue
 
                 x1, y1, x2, y2 = [float(v) for v in bbox]
