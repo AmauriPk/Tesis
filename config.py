@@ -61,6 +61,12 @@ PTZ_CONFIG = {
     # Inversión de ejes (hardware-specific)
     "invert_pan":        _env_bool("PTZ_INVERT_PAN",                 False),
     "invert_tilt":       _env_bool("PTZ_INVERT_TILT",                False),
+    # Readquisición activa (RO-04): barrido angular ±15° tras pérdida de target
+    "reacq_enabled":    _env_bool("PTZ_REACQ_ENABLED",   True),
+    "reacq_duration_s": _env_float("PTZ_REACQ_DURATION_S", 3.0),  # RO-04: T=3 s
+    "reacq_speed":      _env_float("PTZ_REACQ_SPEED",    0.20),   # velocidad suave
+    "reacq_pulse_s":    _env_float("PTZ_REACQ_PULSE_S",  0.40),   # duración de cada pulso
+    "reacq_pause_s":    _env_float("PTZ_REACQ_PAUSE_S",  0.20),   # pausa entre pulsos
 }
 
 # ======================== CONFIGURACIÃ"N DE VIDEO ========================

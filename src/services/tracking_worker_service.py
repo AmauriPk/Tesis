@@ -11,6 +11,62 @@ from config import PTZ_CONFIG
 logger = logging.getLogger(__name__)
 
 
+class ReacquisitionPattern:
+    """
+    Genera secuencia de movimientos de búsqueda tras pérdida de target.
+    Patrón: L → R → L+arriba → R+arriba → L+abajo → R+abajo → arriba → abajo
+    Simula barrido angular ±15° usando ContinuousMove con pulsos cortos.
+    """
+
+    _PATTERN = [
+        (-1,  0),   # pan izquierda
+        ( 1,  0),   # pan derecha
+        (-1,  1),   # izquierda + arriba
+        ( 1,  1),   # derecha + arriba
+        (-1, -1),   # izquierda + abajo
+        ( 1, -1),   # derecha + abajo
+        ( 0,  1),   # tilt arriba (centro)
+        ( 0, -1),   # tilt abajo (centro)
+    ]
+
+    def __init__(self, speed: float, pulse_s: float, pause_s: float, total_s: float):
+        self.speed    = float(speed)
+        self.pulse_s  = float(pulse_s)
+        self.pause_s  = float(pause_s)
+        self.total_s  = float(total_s)
+        self._started_at  = time.time()
+        self._step_idx    = 0
+        self._step_until  = time.time() + float(pulse_s)  # primer pulso arranca de inmediato
+        self._pause_until = 0.0
+
+    @property
+    def expired(self) -> bool:
+        return (time.time() - self._started_at) >= self.total_s
+
+    def next_command(self) -> tuple[float, float] | None:
+        """
+        Retorna (pan, tilt) para el pulso actual, o None si está en pausa.
+        Avanza el patrón automáticamente cuando el pulso termina.
+        """
+        now = time.time()
+
+        if self.expired:
+            return None
+
+        if now < self._pause_until:
+            return None
+
+        if now < self._step_until:
+            pan_s, tilt_s = self._PATTERN[self._step_idx % len(self._PATTERN)]
+            return (pan_s * self.speed, tilt_s * self.speed)
+
+        # Pulso terminado → pausa y avanzar al siguiente paso
+        self._pause_until = now + self.pause_s
+        self._step_idx   += 1
+        self._step_until  = self._pause_until + self.pulse_s
+        return None
+
+
 class TrackingPTZWorker:
     def __init__(
         self,
@@ -35,10 +91,21 @@ class TrackingPTZWorker:
         self._last_cmd = (0.0, 0.0)
         self._was_moving = False
         self._last_error_log_at = 0.0
+        self._reacq: ReacquisitionPattern | None = None
+        self._reacq_log_done = False  # True = reacq agotada; previene reinicio hasta recuperar target
 
     def start(self):
         if not self._thread.is_alive():
             self._thread.start()
+
+    def get_reacq_state(self) -> dict:
+        """Estado de readquisición para exposición en métricas."""
+        reacq = self._reacq
+        if reacq is None:
+            return {"ptz_reacquiring": False, "ptz_reacq_remaining_s": 0.0}
+        elapsed = time.time() - reacq._started_at
+        remaining = round(max(0.0, reacq.total_s - elapsed), 1)
+        return {"ptz_reacquiring": not reacq.expired, "ptz_reacq_remaining_s": remaining}
 
     def _run(self):
         while not self._stop.is_set():
@@ -61,12 +128,64 @@ class TrackingPTZWorker:
 
                 has_target = bool(snap.get("has_target")) and bool(snap.get("bbox"))
                 age = now - float(snap.get("updated_at") or 0.0)
-                if (not has_target) or (age > ttl):
-                    if self._was_moving:
-                        self._ptz_worker.enqueue_stop()
-                        self._was_moving = False
-                        logger.debug("tracking_worker stop reason=target_lost age=%.2f", float(age))
+                target_lost = (not has_target) or (age > ttl)
+
+                if target_lost:
+                    if bool(PTZ_CONFIG.get("reacq_enabled", True)):
+                        # Iniciar readquisición si no está activa y no está agotada
+                        if self._reacq is None and not self._reacq_log_done:
+                            self._reacq = ReacquisitionPattern(
+                                speed=float(PTZ_CONFIG["reacq_speed"]),
+                                pulse_s=float(PTZ_CONFIG["reacq_pulse_s"]),
+                                pause_s=float(PTZ_CONFIG["reacq_pause_s"]),
+                                total_s=float(PTZ_CONFIG["reacq_duration_s"]),
+                            )
+                            logger.info(
+                                "PTZ readquisición iniciada — buscando target por %.1fs",
+                                float(PTZ_CONFIG["reacq_duration_s"]),
+                            )
+
+                        if self._reacq is not None:
+                            if self._reacq.expired:
+                                if not self._reacq_log_done:
+                                    logger.warning("PTZ readquisición agotada — target no recuperado")
+                                    self._reacq_log_done = True
+                                self._reacq = None
+                                if self._was_moving:
+                                    self._ptz_worker.enqueue_stop()
+                                    self._was_moving = False
+                            else:
+                                cmd = self._reacq.next_command()
+                                if cmd is not None:
+                                    pan, tilt = cmd
+                                    self._ptz_worker.enqueue_move(
+                                        x=float(pan), y=float(tilt), zoom=0.0,
+                                        duration_s=float(PTZ_CONFIG["reacq_pulse_s"]),
+                                        source="reacq",
+                                    )
+                                    self._was_moving = True
+                                else:
+                                    if self._was_moving:
+                                        self._ptz_worker.enqueue_stop()
+                                        self._was_moving = False
+                        else:
+                            # Reacq agotada — mantener parado
+                            if self._was_moving:
+                                self._ptz_worker.enqueue_stop()
+                                self._was_moving = False
+                    else:
+                        # Readquisición deshabilitada — comportamiento original
+                        if self._was_moving:
+                            self._ptz_worker.enqueue_stop()
+                            self._was_moving = False
+                            logger.debug("tracking_worker stop reason=target_lost age=%.2f", float(age))
                     continue
+
+                # Target recuperado — cancelar readquisición activa si existía
+                if self._reacq is not None or self._reacq_log_done:
+                    logger.info("PTZ target recuperado — readquisición cancelada")
+                    self._reacq = None
+                    self._reacq_log_done = False
 
                 command_interval = float(self._clamp(PTZ_CONFIG["command_interval"], 0.20, 1.00))
                 if (now - float(self._last_cmd_at)) < float(command_interval):

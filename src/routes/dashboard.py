@@ -36,6 +36,7 @@ def init_dashboard_routes(**deps: Any) -> None:
 
     get_live_processor: Callable[[], Any] = _get_dep("get_live_processor")
     get_live_reader: Callable[[], Any] = _get_dep("get_live_reader")
+    get_tracking_worker: Callable[[], Any] = _deps.get("get_tracking_worker") or (lambda: None)
 
     get_or_create_camera_config = _get_dep("get_or_create_camera_config")
     leer_config_camara = _get_dep("leer_config_camara")
@@ -92,6 +93,12 @@ def init_dashboard_routes(**deps: Any) -> None:
             data = processor.get_metrics()
         except Exception as exc:
             return jsonify({"error": str(exc)}), 500
+        try:
+            worker = get_tracking_worker()
+            if worker is not None:
+                data.update(worker.get_reacq_state())
+        except Exception:
+            pass
         return jsonify(data), 200
 
     @dashboard_bp.get("/api/historical_metrics", endpoint="historical_metrics")

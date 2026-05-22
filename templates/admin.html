@@ -304,6 +304,10 @@
                                         <div class="form-hint mb-1">Actualizado</div>
                                         <div class="fs-6 value-pill text-truncate" id="mLastUpdate" style="max-width:120px; margin:auto;">—</div>
                                     </div>
+                                    <div class="col-6 col-md-3">
+                                        <div class="form-hint mb-1">Estado PTZ</div>
+                                        <div class="fs-5 fw-bold value-pill" id="mPtzState">—</div>
+                                    </div>
                                 </div>
                                 <div class="alert alert-danger mt-3 mb-0 d-none" id="metricsLiveErr"></div>
                             </div>
@@ -457,6 +461,21 @@
                     var ts = d.last_update ? d.last_update.replace('T', ' ').slice(0, 19) : '—';
                     setText('mLastUpdate', ts);
                     setText('metricsLiveBadge', 'Vivo');
+                    var ptzEl = document.getElementById('mPtzState');
+                    if (ptzEl) {
+                        if (d.ptz_reacquiring !== undefined) {
+                            if (d.ptz_reacquiring) {
+                                ptzEl.textContent = 'Buscando ' + d.ptz_reacq_remaining_s + 's';
+                                ptzEl.style.color = '#ffc107';
+                            } else {
+                                ptzEl.textContent = d.camera_connected ? 'Rastreando' : 'Inactivo';
+                                ptzEl.style.color = d.camera_connected ? '#00ff41' : 'rgba(255,255,255,.45)';
+                            }
+                        } else {
+                            ptzEl.textContent = '—';
+                            ptzEl.style.color = '';
+                        }
+                    }
                 })
                 .catch(function (e) { showErr('metricsLiveErr', 'Error: ' + e.message); });
         }

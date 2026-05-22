@@ -627,6 +627,7 @@ init_dashboard_routes(
     get_or_create_camera_config=get_or_create_camera_config,
     leer_config_camara=leer_config_camara,
     get_configured_camera_type=get_configured_camera_type,
+    get_tracking_worker=lambda: tracking_worker,
 )
 app.register_blueprint(dashboard_bp)
 
