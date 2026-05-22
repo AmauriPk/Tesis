@@ -1,6 +1,6 @@
 from __future__ import annotations
 """
-RPAS Micro - Prototipo de detección de drones (tesis).
+SIRAN — Sistema Integrado de Reconocimiento de Aeronaves No Tripuladas (tesis).
 
 Reglas INTRANSFERIBLES (NO eliminar; solo optimizar/refactorizar):
 1) YOLO26 en GPU (cuda:0) para inferencia.
@@ -67,7 +67,7 @@ from flask_login import (
     login_required,
 )
 
-from config import FLASK_CONFIG, ONVIF_CONFIG, PTZ_CONFIG, RTSP_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG, _env_float, _env_int
+from config import FLASK_CONFIG, ONVIF_CONFIG, PTZ_CONFIG, RTSP_CONFIG, SECURITY_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG, _env_float, _env_int
 from src.system_core import CameraConfig, FrameRecord, MetricsDBWriter, PTZController, User, db
 from src.video_processor import LiveStreamDeps, LiveVideoProcessor, RTSPLatestFrameReader
 from src.services.camera_state_service import (
@@ -103,6 +103,15 @@ from src.routes.model_params import model_params_bp, init_model_params_routes
 from src.routes.ptz_manual import ptz_manual_bp, init_ptz_manual_routes
 from src.routes.automation import automation_bp, init_automation_routes
 from src.routes.media import media_bp, init_media_routes
+
+# ======================== VALIDACIÓN DE ARRANQUE ========================
+if not SECURITY_CONFIG["encrypt_key"]:
+    logger.critical(
+        "SIRAN_ENCRYPT_KEY no configurada. "
+        "Las credenciales de cámara no podrán cifrarse. "
+        'Generar con: python -c "from cryptography.fernet import Fernet; '
+        'print(Fernet.generate_key().decode())"'
+    )
 
 # ======================== APP / DB ========================
 app = Flask(__name__)
@@ -144,7 +153,7 @@ app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", ""
 }
 
 if FLASK_CONFIG.get("debug"):
-    # En asdasdasdasddesarrollo: recargar templates y evitar caché agresiva de estáticos.
+    # En desarrollo: recargar templates y evitar caché agresiva de estáticos.
     app.config["TEMPLATES_AUTO_RELOAD"] = True
     app.jinja_env.auto_reload = True
     app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
@@ -665,19 +674,6 @@ init_media_routes(
     role_required=role_required,
 )
 app.register_blueprint(media_bp)
-
-# ======================== STREAM + STATUS ========================
-@app.get("/api/get_camera_status")
-@login_required
-def api_get_camera_status():
-    """
-    Devuelve el tipo de camara configurado (PTZ vs fixed) segun el archivo persistido.
-
-    Returns:
-        JSON con `camera_type` y `configured_is_ptz`.
-    """
-    is_ptz = bool(leer_config_camara())
-    return jsonify({"status": "ok", "camera_type": ("ptz" if is_ptz else "fixed"), "configured_is_ptz": is_ptz}), 200
 
 init_automation_routes(
     role_required=role_required,

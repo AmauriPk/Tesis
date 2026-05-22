@@ -11,6 +11,7 @@ import cv2
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import login_required
 from src.routes import get_dep
+from config import ONVIF_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +195,7 @@ def init_admin_camera_routes(**deps: Any) -> None:
             return jsonify({"ok": False, "error": "Completa host/usuario/contraseña ONVIF."}), 400
         try:
             port = normalized_onvif_port(cfg.onvif_port)
-            if int(cfg.onvif_port or 0) == 554:
+            if int(cfg.onvif_port or 0) == ONVIF_CONFIG["rtsp_port"]:
                 logger.warning("onvif_port=554 parece RTSP; usando 80 para ONVIF.")
             logger.debug(
                 "PTZ config host=%s port=%s username=%s password_configurada=%s password_len=%s",

@@ -18,7 +18,7 @@ from typing import Any, Callable, Optional
 import cv2
 import numpy as np
 
-from config import PTZ_CONFIG
+from config import PTZ_CONFIG, YOLO_CONFIG
 from src.system_core import clamp, select_priority_detection
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ def draw_detections(
     frame: np.ndarray,
     results: Any,
     *,
-    label: str = "RPAS Micro",
+    label: str = "RPAS",
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
     """Dibuja bounding boxes y retorna una lista normalizada de detecciones."""
     detection_list: list[dict[str, Any]] = []
@@ -193,9 +193,9 @@ def ptz_centering_vector(
     if abs(error_y) >= float(tol):
         tilt = _prop_clamp(-float(k_tilt) * float(error_y), float(min_spd), float(spd))
 
-    if os.environ.get("PTZ_INVERT_PAN", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}:
+    if PTZ_CONFIG["invert_pan"]:
         pan = -1.0 * float(pan)
-    if os.environ.get("PTZ_INVERT_TILT", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}:
+    if PTZ_CONFIG["invert_tilt"]:
         tilt = -1.0 * float(tilt)
 
     return float(pan), float(tilt)
@@ -647,7 +647,7 @@ class LiveVideoProcessor:
                         self._persistence.set_required_consecutive_frames(required)
 
                     iou_value = float(params.get("iou_threshold", 0.45))
-                    iou_value = float(clamp(iou_value, 0.45, 0.90))
+                    iou_value = float(clamp(iou_value, YOLO_CONFIG["iou_clamp_min"], YOLO_CONFIG["iou_clamp_max"]))
 
                     t0 = time.time()
                     device_value = (

@@ -7,6 +7,7 @@ import pytest
 from flask import Blueprint, Flask
 from flask_login import LoginManager
 
+import config as _config
 import src.routes.auth as auth_routes
 
 
@@ -71,6 +72,7 @@ def app(monkeypatch):
             return _User(id="1", username="admin")
         return None
 
+    importlib.reload(_config)   # re-evalúa SECURITY_CONFIG con los env vars del monkeypatch
     ar = importlib.reload(auth_routes)
     # Asegurar estado limpio entre pruebas.
     try:

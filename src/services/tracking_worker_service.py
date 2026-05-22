@@ -140,9 +140,9 @@ class TrackingPTZWorker:
                     elif tilt < -1e-6:
                         reason = "down"
 
-                if os.environ.get("PTZ_INVERT_PAN", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}:
+                if PTZ_CONFIG["invert_pan"]:
                     pan = -1.0 * float(pan)
-                if os.environ.get("PTZ_INVERT_TILT", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}:
+                if PTZ_CONFIG["invert_tilt"]:
                     tilt = -1.0 * float(tilt)
 
                 if abs(float(pan)) < 1e-6 and abs(float(tilt)) < 1e-6:

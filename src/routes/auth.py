@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 from src.routes import get_dep
+from config import SECURITY_CONFIG
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -111,19 +112,9 @@ def init_auth_routes(**deps: Any) -> None:
 
         if request.method == "POST":
             now = time.time()
-            # Config por env (dinámico; no requiere reiniciar tests).
-            try:
-                max_attempts = int(os.environ.get("LOGIN_MAX_ATTEMPTS", "5").strip() or "5")
-            except Exception:
-                max_attempts = 5
-            try:
-                lockout_s = int(os.environ.get("LOGIN_LOCKOUT_SECONDS", "60").strip() or "60")
-            except Exception:
-                lockout_s = 60
-            try:
-                window_s = int(os.environ.get("LOGIN_WINDOW_SECONDS", "300").strip() or "300")
-            except Exception:
-                window_s = 300
+            max_attempts = SECURITY_CONFIG["login_max_attempts"]
+            lockout_s    = SECURITY_CONFIG["login_lockout_seconds"]
+            window_s     = SECURITY_CONFIG["login_window_seconds"]
             max_attempts = max(1, min(50, int(max_attempts)))
             lockout_s = max(1, min(3600, int(lockout_s)))
             window_s = max(5, min(3600, int(window_s)))

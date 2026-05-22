@@ -6,6 +6,7 @@ from typing import Any, Callable
 from flask import Blueprint, jsonify, request
 from flask_login import login_required
 from src.routes import get_dep
+from config import ONVIF_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ def init_ptz_manual_routes(**deps: Any) -> None:
             return jsonify({"ok": False, "error": "ONVIF_HOST no configurado."}), 400
         if not username or not password:
             return jsonify({"ok": False, "error": "Credenciales ONVIF incompletas (ONVIF_USERNAME/ONVIF_PASSWORD)."}), 400
-        if int(cfg.onvif_port or 0) == 554:
+        if int(cfg.onvif_port or 0) == ONVIF_CONFIG["rtsp_port"]:
             logger.warning("onvif_port=554 parece RTSP; usando 80 para ONVIF.")
 
         payload = request.get_json(silent=True) or {}

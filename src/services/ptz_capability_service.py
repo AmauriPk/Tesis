@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from typing import Any, Callable
+from config import ONVIF_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ class PTZCapabilityService:
             raw_onvif_port = int(getattr(cfg, "onvif_port", None) or 80)
         except Exception:
             raw_onvif_port = 80
-        if raw_onvif_port == 554:
+        if raw_onvif_port == ONVIF_CONFIG["rtsp_port"]:
             logger.warning("onvif_port=554 parece RTSP; usando 80 para ONVIF.")
         configured_onvif_port = self.normalized_onvif_port(raw_onvif_port)
         username = (getattr(cfg, "onvif_username", None) or "").strip()
@@ -142,7 +143,7 @@ class PTZCapabilityService:
 
         def _ports_to_try(port: int) -> list[int]:
             common = [80, 8000, 8080]
-            if port == 554:
+            if port == ONVIF_CONFIG["rtsp_port"]:
                 logger.warning("ONVIF_PORT=554 parece RTSP; se ignorará y se probarán puertos ONVIF comunes.")
                 return common
             ports: list[int] = [port]

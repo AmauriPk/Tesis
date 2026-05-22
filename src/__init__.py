@@ -1,11 +1,11 @@
 """
-RPAS Micro - Módulos de procesamiento de visión y control.
+SIRAN — Módulos de procesamiento de visión y control de aeronaves no tripuladas.
 
 Subpaquetes:
 - video_processor: Captura y procesamiento de frames RTSP
-- camera_controller: Control de cámaras PTZ vía ONVIF
-- metrics_handler: Persistencia de métricas en SQLite
+- routes: Blueprints Flask (dashboard, admin, auth, PTZ, dataset, análisis)
+- services: Servicios de soporte (PTZ, cámara, sesión, cifrado, exportación)
 """
 
-__version__ = "1.1.0"
-__author__ = "RPAS Development Team"
+__version__ = "2.0.0"
+__author__ = "SIRAN Development Team"

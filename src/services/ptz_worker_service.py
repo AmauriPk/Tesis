@@ -5,6 +5,7 @@ import queue
 import threading
 import time
 from typing import Any, Callable, Optional, Type
+from config import ONVIF_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,7 @@ class PTZCommandWorker:
             if not cfg.onvif_host or not cfg.onvif_username or not cfg.onvif_password:
                 return None
             port = self._normalized_onvif_port(cfg.onvif_port)
-            if int(cfg.onvif_port or 0) == 554:
+            if int(cfg.onvif_port or 0) == ONVIF_CONFIG["rtsp_port"]:
                 logger.warning("onvif_port=554 parece RTSP; usando 80 para ONVIF.")
             username = str(cfg.onvif_username or "")
             password = str(cfg.onvif_password or "")

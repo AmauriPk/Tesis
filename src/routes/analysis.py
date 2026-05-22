@@ -18,6 +18,7 @@ from werkzeug.utils import secure_filename
 
 from src.routes import get_dep
 from src.services.video_export_service import create_video_writer, make_browser_compatible_mp4
+from config import VIDEO_CONFIG
 from src.system_core import FrameRecord
 from src.video_processor import draw_detections
 
@@ -204,8 +205,8 @@ def _process_image_and_persist(job_id: str, path: str):
     _set_job_progress(job_id, 10, status="infering")
 
     h, w = image.shape[:2]
-    if w > 1280 or h > 720:
-        scale = min(1280 / w, 720 / h)
+    if w > VIDEO_CONFIG["width"] or h > VIDEO_CONFIG["height"]:
+        scale = min(VIDEO_CONFIG["width"] / w, VIDEO_CONFIG["height"] / h)
         image = cv2.resize(image, (int(w * scale), int(h * scale)))
 
     params = _get_dep("get_model_params")()
@@ -293,8 +294,8 @@ def _process_video_and_persist(job_id: str, path: str, original_filename: str | 
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or _get_dep("VIDEO_CONFIG")["height"]
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
 
-    if width > 1280 or height > 720:
-        scale = min(1280 / width, 720 / height)
+    if width > VIDEO_CONFIG["width"] or height > VIDEO_CONFIG["height"]:
+        scale = min(VIDEO_CONFIG["width"] / width, VIDEO_CONFIG["height"] / height)
         width = int(width * scale)
         height = int(height * scale)
 
