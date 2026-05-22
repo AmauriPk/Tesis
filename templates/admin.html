@@ -308,6 +308,10 @@
                                         <div class="form-hint mb-1">Estado PTZ</div>
                                         <div class="fs-5 fw-bold value-pill" id="mPtzState">—</div>
                                     </div>
+                                    <div class="col-6 col-md-3">
+                                        <div class="form-hint mb-1">Tracks activos</div>
+                                        <div class="fs-4 fw-bold value-pill" id="mTracks">—</div>
+                                    </div>
                                 </div>
                                 <div class="alert alert-danger mt-3 mb-0 d-none" id="metricsLiveErr"></div>
                             </div>
@@ -461,6 +465,7 @@
                     var ts = d.last_update ? d.last_update.replace('T', ' ').slice(0, 19) : '—';
                     setText('mLastUpdate', ts);
                     setText('metricsLiveBadge', 'Vivo');
+                    if (d.active_tracks !== undefined) setText('mTracks', d.active_tracks);
                     var ptzEl = document.getElementById('mPtzState');
                     if (ptzEl) {
                         if (d.ptz_reacquiring !== undefined) {

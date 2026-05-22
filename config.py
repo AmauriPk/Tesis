@@ -73,6 +73,13 @@ PTZ_CONFIG = {
     "iou_continuity_misses":  _env_int("PTZ_IOU_CONTINUITY_MISSES", 3),    # frames consecutivos antes de readquisición
 }
 
+# ======================== TRACKER (SORT simplificado) ========================
+TRACKER_CONFIG = {
+    "iou_threshold": _env_float("TRACKER_IOU_THRESHOLD", 0.30),
+    "max_misses":    _env_int("TRACKER_MAX_MISSES",       3),
+    "min_hits":      _env_int("TRACKER_MIN_HITS",         1),
+}
+
 # ======================== CONFIGURACIÃ"N DE VIDEO ========================
 VIDEO_CONFIG = {
     "width": _env_int("VIDEO_WIDTH", 1280),
@@ -132,6 +139,7 @@ __all__ = [
     "RTSP_CONFIG",
     "SECURITY_CONFIG",
     "STORAGE_CONFIG",
+    "TRACKER_CONFIG",
     "VIDEO_CONFIG",
     "YOLO_CONFIG",
     "DATASET_TRAINING_ROOT",

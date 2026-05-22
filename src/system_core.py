@@ -372,10 +372,18 @@ class MetricsDBWriter:
                 frame_h INTEGER,
                 confirmed INTEGER,
                 camera_mode TEXT,
-                image_path TEXT
+                image_path TEXT,
+                track_id INTEGER
             )
             """
         )
+        # Migración: agregar track_id si la tabla ya existe sin esa columna
+        try:
+            con.execute("ALTER TABLE detections_v2 ADD COLUMN track_id INTEGER")
+            con.commit()
+        except sqlite3.OperationalError:
+            pass  # columna ya existe
+
         con.commit()
 
     def _run(self) -> None:
@@ -430,6 +438,7 @@ class MetricsDBWriter:
                             1 if r.confirmed else 0,
                             r.camera_mode,
                             d.get("image_path"),
+                            d.get("track_id"),
                         )
                         for r in pending
                         for d in r.detections
@@ -438,8 +447,8 @@ class MetricsDBWriter:
                         cur.executemany(
                             """
                             INSERT INTO detections_v2
-                            (timestamp, class_name, confidence, x1, y1, x2, y2, source, inference_ms, frame_w, frame_h, confirmed, camera_mode, image_path)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            (timestamp, class_name, confidence, x1, y1, x2, y2, source, inference_ms, frame_w, frame_h, confirmed, camera_mode, image_path, track_id)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             det_rows,
                         )

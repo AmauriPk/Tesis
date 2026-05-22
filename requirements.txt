@@ -9,6 +9,7 @@ onvif-zeep>=0.2.12,<0.3.0
 tqdm>=4.66.0,<5.0.0
 imageio-ffmpeg>=0.5.0,<0.6.0  # transcodificación FFmpeg (no usar ffmpeg-python)
 numpy>=1.24.0,<2.0.0
+scipy>=1.10.0
 pytest>=7.4.0,<8.0.0
 pyyaml>=6.0.0,<7.0.0
 cryptography>=41.0.0

@@ -19,7 +19,8 @@ from typing import Any, Callable, Optional
 import cv2
 import numpy as np
 
-from config import PTZ_CONFIG, YOLO_CONFIG
+from config import PTZ_CONFIG, TRACKER_CONFIG, YOLO_CONFIG
+from src.services.tracker_service import SORTTracker
 from src.system_core import clamp, select_priority_detection
 
 logger = logging.getLogger(__name__)
@@ -439,6 +440,12 @@ class LiveVideoProcessor:
         self._frame_count = 0
         self._detection_times: list[float] = []
         self._inference_ms_times: collections.deque = collections.deque(maxlen=30)
+        self._tracker = SORTTracker(
+            iou_threshold=float(TRACKER_CONFIG["iou_threshold"]),
+            max_misses=int(TRACKER_CONFIG["max_misses"]),
+            min_hits=int(TRACKER_CONFIG["min_hits"]),
+        )
+        self._last_reconnect_count: int = 0
         self._persistence = DetectionPersistence(int(self.get_model_params().get("persistence_frames", 3)))
         # Tracking PTZ se ejecuta fuera de este hilo (app.py) para no bloquear video.
 
@@ -507,6 +514,7 @@ class LiveVideoProcessor:
             "confidence_avg": round(float(state.get("avg_confidence") or 0.0), 3),
             "camera_connected": bool(reader_status.get("is_connected", False)),
             "last_update": str(state.get("last_update") or ""),
+            "active_tracks": self._tracker.active_track_count,
         }
 
     def mjpeg_generator(self) -> Any:
@@ -652,6 +660,15 @@ class LiveVideoProcessor:
 
     def _run(self) -> None:
         while not self._stop.is_set():
+            # Detectar reconexión RTSP → resetear tracker para no propagar IDs obsoletos
+            try:
+                current_rc = int(self.reader.get_status().get("reconnect_count") or 0)
+                if current_rc != self._last_reconnect_count:
+                    self._last_reconnect_count = current_rc
+                    self._tracker.reset()
+            except Exception:
+                pass
+
             frame, ts = self.reader.get_latest()
             if frame is None or ts is None:
                 time.sleep(0.02)
@@ -710,6 +727,7 @@ class LiveVideoProcessor:
                     self._inference_ms_times.append(inference_ms)
                     frame, detection_list = draw_detections(frame, results)
                     detection_list = dedupe_overlapping_detections(detection_list, iou_threshold=float(iou_value))
+                    detection_list = self._tracker.update(detection_list)
                 except cv2.error:
                     pass
                 except RuntimeError:
