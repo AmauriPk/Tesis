@@ -1,0 +1,64 @@
+<svg width="400" height="400" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" style="background:#0A0A0A">
+
+  <!-- Círculo exterior principal -->
+  <circle cx="200" cy="200" r="170" fill="none" stroke="#22C55E" stroke-width="4"/>
+
+  <!-- Marcas de graduación en el círculo (como instrumento óptico) -->
+  <!-- Superior -->
+  <line x1="200" y1="30" x2="200" y2="52" stroke="#22C55E" stroke-width="3"/>
+  <!-- Inferior -->
+  <line x1="200" y1="348" x2="200" y2="370" stroke="#22C55E" stroke-width="3"/>
+  <!-- Izquierdo -->
+  <line x1="30" y1="200" x2="52" y2="200" stroke="#22C55E" stroke-width="3"/>
+  <!-- Derecho -->
+  <line x1="348" y1="200" x2="370" y2="200" stroke="#22C55E" stroke-width="3"/>
+  <!-- Marcas secundarias (45°) -->
+  <line x1="80" y1="80" x2="93" y2="93" stroke="#22C55E" stroke-width="1.5" opacity="0.4"/>
+  <line x1="320" y1="80" x2="307" y2="93" stroke="#22C55E" stroke-width="1.5" opacity="0.4"/>
+  <line x1="80" y1="320" x2="93" y2="307" stroke="#22C55E" stroke-width="1.5" opacity="0.4"/>
+  <line x1="320" y1="320" x2="307" y2="307" stroke="#22C55E" stroke-width="1.5" opacity="0.4"/>
+
+  <!-- Círculo interior decorativo -->
+  <circle cx="200" cy="200" r="148" fill="none" stroke="#22C55E" stroke-width="1" opacity="0.18"/>
+
+  <!-- Línea de horizonte -->
+  <line x1="50" y1="222" x2="350" y2="222" stroke="#22C55E" stroke-width="2.5" opacity="0.5"/>
+
+  <!-- Líneas de señal / radar irradiando del dron -->
+  <path d="M136 148 Q110 118 120 80" fill="none" stroke="#22C55E" stroke-width="1.5" opacity="0.3" stroke-dasharray="4 5"/>
+  <path d="M264 148 Q290 118 280 80" fill="none" stroke="#22C55E" stroke-width="1.5" opacity="0.3" stroke-dasharray="4 5"/>
+  <path d="M142 142 Q118 100 140 62" fill="none" stroke="#22C55E" stroke-width="1" opacity="0.18" stroke-dasharray="3 6"/>
+  <path d="M258 142 Q282 100 260 62" fill="none" stroke="#22C55E" stroke-width="1" opacity="0.18" stroke-dasharray="3 6"/>
+
+  <!-- Punto de mira central (debajo del dron) -->
+  <circle cx="200" cy="195" r="6" fill="none" stroke="#22C55E" stroke-width="2" opacity="0.5"/>
+  <line x1="200" y1="182" x2="200" y2="189" stroke="#22C55E" stroke-width="2" opacity="0.5"/>
+  <line x1="200" y1="201" x2="200" y2="208" stroke="#22C55E" stroke-width="2" opacity="0.5"/>
+  <line x1="187" y1="195" x2="194" y2="195" stroke="#22C55E" stroke-width="2" opacity="0.5"/>
+  <line x1="206" y1="195" x2="213" y2="195" stroke="#22C55E" stroke-width="2" opacity="0.5"/>
+
+  <!-- DRON cuadricóptero — brazos diagonales gruesos -->
+  <line x1="148" y1="162" x2="252" y2="210" stroke="#22C55E" stroke-width="4"/>
+  <line x1="252" y1="162" x2="148" y2="210" stroke="#22C55E" stroke-width="4"/>
+
+  <!-- Rotores (círculos en las puntas) -->
+  <circle cx="148" cy="162" r="12" fill="#0A0A0A" stroke="#22C55E" stroke-width="4"/>
+  <circle cx="252" cy="162" r="12" fill="#0A0A0A" stroke="#22C55E" stroke-width="4"/>
+  <circle cx="148" cy="210" r="12" fill="#0A0A0A" stroke="#22C55E" stroke-width="4"/>
+  <circle cx="252" cy="210" r="12" fill="#0A0A0A" stroke="#22C55E" stroke-width="4"/>
+
+  <!-- Cuerpo central del dron -->
+  <rect x="180" y="178" width="40" height="20" rx="6" fill="#22C55E"/>
+  <rect x="191" y="167" width="18" height="42" rx="6" fill="#22C55E" opacity="0.4"/>
+
+  <!-- CORCHETES DE TRACKING — más gruesos y pronunciados -->
+  <!-- Superior izquierdo -->
+  <path d="M110 148 L110 118 L140 118" fill="none" stroke="#22C55E" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Superior derecho -->
+  <path d="M260 118 L290 118 L290 148" fill="none" stroke="#22C55E" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Inferior izquierdo -->
+  <path d="M110 224 L110 254 L140 254" fill="none" stroke="#22C55E" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Inferior derecho -->
+  <path d="M260 254 L290 254 L290 224" fill="none" stroke="#22C55E" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+
+</svg>

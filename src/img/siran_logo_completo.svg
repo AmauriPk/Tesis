@@ -1,0 +1,62 @@
+<svg width="400" height="500" viewBox="0 0 400 500" xmlns="http://www.w3.org/2000/svg" style="background:#0A0A0A">
+
+  <!-- Círculo exterior principal -->
+  <circle cx="200" cy="190" r="160" fill="none" stroke="#22C55E" stroke-width="4"/>
+
+  <!-- Marcas de graduación -->
+  <line x1="200" y1="30" x2="200" y2="50" stroke="#22C55E" stroke-width="3"/>
+  <line x1="200" y1="330" x2="200" y2="350" stroke="#22C55E" stroke-width="3"/>
+  <line x1="40" y1="190" x2="60" y2="190" stroke="#22C55E" stroke-width="3"/>
+  <line x1="340" y1="190" x2="360" y2="190" stroke="#22C55E" stroke-width="3"/>
+  <line x1="76" y1="76" x2="89" y2="89" stroke="#22C55E" stroke-width="1.5" opacity="0.4"/>
+  <line x1="324" y1="76" x2="311" y2="89" stroke="#22C55E" stroke-width="1.5" opacity="0.4"/>
+  <line x1="76" y1="304" x2="89" y2="291" stroke="#22C55E" stroke-width="1.5" opacity="0.4"/>
+  <line x1="324" y1="304" x2="311" y2="291" stroke="#22C55E" stroke-width="1.5" opacity="0.4"/>
+
+  <!-- Círculo interior decorativo -->
+  <circle cx="200" cy="190" r="140" fill="none" stroke="#22C55E" stroke-width="1" opacity="0.18"/>
+
+  <!-- Línea de horizonte -->
+  <line x1="58" y1="210" x2="342" y2="210" stroke="#22C55E" stroke-width="2.5" opacity="0.5"/>
+
+  <!-- Señales radar -->
+  <path d="M140 140 Q114 110 124 74" fill="none" stroke="#22C55E" stroke-width="1.5" opacity="0.28" stroke-dasharray="4 5"/>
+  <path d="M260 140 Q286 110 276 74" fill="none" stroke="#22C55E" stroke-width="1.5" opacity="0.28" stroke-dasharray="4 5"/>
+
+  <!-- Punto de mira -->
+  <circle cx="200" cy="185" r="6" fill="none" stroke="#22C55E" stroke-width="2" opacity="0.45"/>
+  <line x1="200" y1="172" x2="200" y2="179" stroke="#22C55E" stroke-width="2" opacity="0.45"/>
+  <line x1="200" y1="191" x2="200" y2="198" stroke="#22C55E" stroke-width="2" opacity="0.45"/>
+  <line x1="187" y1="185" x2="194" y2="185" stroke="#22C55E" stroke-width="2" opacity="0.45"/>
+  <line x1="206" y1="185" x2="213" y2="185" stroke="#22C55E" stroke-width="2" opacity="0.45"/>
+
+  <!-- Dron -->
+  <line x1="148" y1="152" x2="252" y2="200" stroke="#22C55E" stroke-width="4"/>
+  <line x1="252" y1="152" x2="148" y2="200" stroke="#22C55E" stroke-width="4"/>
+  <circle cx="148" cy="152" r="12" fill="#0A0A0A" stroke="#22C55E" stroke-width="4"/>
+  <circle cx="252" cy="152" r="12" fill="#0A0A0A" stroke="#22C55E" stroke-width="4"/>
+  <circle cx="148" cy="200" r="12" fill="#0A0A0A" stroke="#22C55E" stroke-width="4"/>
+  <circle cx="252" cy="200" r="12" fill="#0A0A0A" stroke="#22C55E" stroke-width="4"/>
+  <rect x="180" y="168" width="40" height="20" rx="6" fill="#22C55E"/>
+  <rect x="191" y="157" width="18" height="42" rx="6" fill="#22C55E" opacity="0.4"/>
+
+  <!-- Corchetes gruesos -->
+  <path d="M112 138 L112 108 L142 108" fill="none" stroke="#22C55E" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M258 108 L288 108 L288 138" fill="none" stroke="#22C55E" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M112 214 L112 244 L142 244" fill="none" stroke="#22C55E" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M258 244 L288 244 L288 214" fill="none" stroke="#22C55E" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Línea separadora entre símbolo y texto -->
+  <line x1="80" y1="378" x2="320" y2="378" stroke="#22C55E" stroke-width="1" opacity="0.3"/>
+
+  <!-- Texto SIRAN -->
+  <text x="200" y="428" text-anchor="middle" fill="#22C55E"
+    font-family="Arial Black, Helvetica Neue, sans-serif"
+    font-size="52" font-weight="900" letter-spacing="18">SIRAN</text>
+
+  <!-- Subtexto -->
+  <text x="200" y="458" text-anchor="middle" fill="#22C55E"
+    font-family="Arial, sans-serif"
+    font-size="9" letter-spacing="4" opacity="0.5">RECONOCIMIENTO AÉREO</text>
+
+</svg>
