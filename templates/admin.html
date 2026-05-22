@@ -59,6 +59,11 @@
                     <i class="fa-solid fa-images me-1"></i> Dataset y Entrenamiento
                 </button>
             </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-metrics" data-bs-toggle="tab" data-bs-target="#pane-metrics" type="button" role="tab">
+                    <i class="fa-solid fa-chart-line me-1"></i> Métricas
+                </button>
+            </li>
         </ul>
 
         <div class="tab-content">
@@ -252,11 +257,91 @@
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- =================== METRICS =================== -->
+            <div class="tab-pane fade" id="pane-metrics" role="tabpanel" aria-labelledby="tab-metrics">
+                <div class="row g-3">
+                    <!-- Live metrics -->
                     <div class="col-12 col-xl-6">
                         <div class="card">
-                            <div class="card-header">Métricas</div>
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><i class="fa-solid fa-bolt me-2"></i>Métricas en Tiempo Real</span>
+                                <span class="badge text-bg-secondary" id="metricsLiveBadge">—</span>
+                            </div>
                             <div class="card-body">
-                                <div class="form-hint">Placeholder UX: aquí puedes agregar métricas del sistema (FPS, latencia, tasa de falsos positivos) sin mezclarlo con hardware/dataset.</div>
+                                <div class="row g-3 text-center">
+                                    <div class="col-6 col-md-3">
+                                        <div class="form-hint mb-1">FPS (actual)</div>
+                                        <div class="fs-4 fw-bold value-pill" id="mFpsLive">—</div>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <div class="form-hint mb-1">FPS (promedio)</div>
+                                        <div class="fs-4 fw-bold value-pill" id="mFpsAvg">—</div>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <div class="form-hint mb-1">Inferencia (ms)</div>
+                                        <div class="fs-4 fw-bold value-pill" id="mInfAvg">—</div>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <div class="form-hint mb-1">Inf. máx (ms)</div>
+                                        <div class="fs-4 fw-bold value-pill" id="mInfMax">—</div>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <div class="form-hint mb-1">Detecciones</div>
+                                        <div class="fs-4 fw-bold value-pill" id="mDets">—</div>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <div class="form-hint mb-1">Confianza prom.</div>
+                                        <div class="fs-4 fw-bold value-pill" id="mConf">—</div>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <div class="form-hint mb-1">Cámara</div>
+                                        <div class="fs-5 fw-bold value-pill" id="mCam">—</div>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <div class="form-hint mb-1">Actualizado</div>
+                                        <div class="fs-6 value-pill text-truncate" id="mLastUpdate" style="max-width:120px; margin:auto;">—</div>
+                                    </div>
+                                </div>
+                                <div class="alert alert-danger mt-3 mb-0 d-none" id="metricsLiveErr"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Historical metrics -->
+                    <div class="col-12 col-xl-6">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><i class="fa-solid fa-clock-rotate-left me-2"></i>Métricas Históricas (últimas 100 filas)</span>
+                                <button class="btn btn-sm btn-outline-light" type="button" id="btnRefreshHistMetrics">
+                                    <i class="fa-solid fa-arrows-rotate"></i>
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <div class="row g-3 text-center">
+                                    <div class="col-6 col-md-3">
+                                        <div class="form-hint mb-1">Muestras</div>
+                                        <div class="fs-4 fw-bold value-pill" id="hSamples">—</div>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <div class="form-hint mb-1">Inf. prom (ms)</div>
+                                        <div class="fs-4 fw-bold value-pill" id="hInfAvg">—</div>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <div class="form-hint mb-1">Inf. p95 (ms)</div>
+                                        <div class="fs-4 fw-bold value-pill" id="hInfP95">—</div>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <div class="form-hint mb-1">Tasa detección</div>
+                                        <div class="fs-4 fw-bold value-pill" id="hDetRate">—</div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="form-hint mb-1">Confirmadas</div>
+                                        <div class="fs-4 fw-bold value-pill" id="hConfirmed">—</div>
+                                    </div>
+                                </div>
+                                <div class="alert alert-danger mt-3 mb-0 d-none" id="metricsHistErr"></div>
                             </div>
                         </div>
                     </div>
@@ -335,5 +420,82 @@
     <script src="/static/admin_camera.js" defer></script>
     <script src="/static/admin_model_params.js" defer></script>
     <script src="/static/admin_dataset.js" defer></script>
+    <script>
+    (function () {
+        var LIVE_URL  = "{{ url_for('dashboard.live_metrics') }}";
+        var HIST_URL  = "{{ url_for('dashboard.historical_metrics') }}";
+        var _liveTimer = null;
+
+        function setText(id, val) {
+            var el = document.getElementById(id);
+            if (el) el.textContent = val;
+        }
+        function showErr(id, msg) {
+            var el = document.getElementById(id);
+            if (!el) return;
+            el.textContent = msg;
+            el.classList.remove('d-none');
+        }
+        function hideErr(id) {
+            var el = document.getElementById(id);
+            if (el) el.classList.add('d-none');
+        }
+
+        function loadLiveMetrics() {
+            fetch(LIVE_URL, { credentials: 'same-origin' })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (d.error) { showErr('metricsLiveErr', d.error); return; }
+                    hideErr('metricsLiveErr');
+                    setText('mFpsLive',    d.fps_live.toFixed(1));
+                    setText('mFpsAvg',     d.fps_avg.toFixed(1));
+                    setText('mInfAvg',     d.inference_ms_avg.toFixed(1) + ' ms');
+                    setText('mInfMax',     d.inference_ms_max.toFixed(1) + ' ms');
+                    setText('mDets',       d.detections_total);
+                    setText('mConf',       (d.confidence_avg * 100).toFixed(1) + '%');
+                    setText('mCam',        d.camera_connected ? '🟢 OK' : '🔴 Sin señal');
+                    var ts = d.last_update ? d.last_update.replace('T', ' ').slice(0, 19) : '—';
+                    setText('mLastUpdate', ts);
+                    setText('metricsLiveBadge', 'Vivo');
+                })
+                .catch(function (e) { showErr('metricsLiveErr', 'Error: ' + e.message); });
+        }
+
+        function loadHistoricalMetrics() {
+            fetch(HIST_URL, { credentials: 'same-origin' })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (d.error) { showErr('metricsHistErr', d.error); return; }
+                    hideErr('metricsHistErr');
+                    setText('hSamples',  d.sample_count);
+                    setText('hInfAvg',   d.inference_ms_avg.toFixed(1) + ' ms');
+                    setText('hInfP95',   d.inference_ms_p95.toFixed(1) + ' ms');
+                    setText('hDetRate',  (d.detection_rate * 100).toFixed(1) + '%');
+                    setText('hConfirmed', d.confirmed_count);
+                })
+                .catch(function (e) { showErr('metricsHistErr', 'Error: ' + e.message); });
+        }
+
+        function startPolling() {
+            loadLiveMetrics();
+            loadHistoricalMetrics();
+            _liveTimer = setInterval(loadLiveMetrics, 2000);
+        }
+        function stopPolling() {
+            if (_liveTimer) { clearInterval(_liveTimer); _liveTimer = null; }
+        }
+
+        var tabBtn = document.getElementById('tab-metrics');
+        if (tabBtn) {
+            tabBtn.addEventListener('shown.bs.tab', startPolling);
+            tabBtn.addEventListener('hidden.bs.tab', stopPolling);
+        }
+
+        var btnRefresh = document.getElementById('btnRefreshHistMetrics');
+        if (btnRefresh) {
+            btnRefresh.addEventListener('click', loadHistoricalMetrics);
+        }
+    }());
+    </script>
 </body>
 </html>

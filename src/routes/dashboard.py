@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import sqlite3
 from typing import Any, Callable
 
 from flask import Blueprint, Response, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
+from config import STORAGE_CONFIG
 from src.routes import get_dep
 
 dashboard_bp = Blueprint("dashboard", __name__)
@@ -79,6 +81,63 @@ def init_dashboard_routes(**deps: Any) -> None:
         """Estado resumido (para badge/UI)."""
         with state_lock:
             return jsonify(dict(current_detection_state))
+
+    @dashboard_bp.get("/api/live_metrics", endpoint="live_metrics")
+    @login_required
+    @role_required("operator")
+    def live_metrics():
+        """Métricas en tiempo real del procesador de video."""
+        processor = get_live_processor()
+        try:
+            data = processor.get_metrics()
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+        return jsonify(data), 200
+
+    @dashboard_bp.get("/api/historical_metrics", endpoint="historical_metrics")
+    @login_required
+    @role_required("operator")
+    def historical_metrics():
+        """Agrega las últimas 100 filas de inference_frames para métricas históricas."""
+        db_path = str(STORAGE_CONFIG.get("db_path", "detections.db"))
+        try:
+            con = sqlite3.connect(db_path, timeout=5, check_same_thread=False)
+            con.row_factory = sqlite3.Row
+            rows = con.execute(
+                """
+                SELECT inference_ms, detections_count, confirmed
+                FROM inference_frames
+                ORDER BY id DESC
+                LIMIT 100
+                """
+            ).fetchall()
+            con.close()
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+
+        if not rows:
+            return jsonify({
+                "sample_count": 0,
+                "inference_ms_avg": 0.0,
+                "inference_ms_p95": 0.0,
+                "detection_rate": 0.0,
+                "confirmed_count": 0,
+            }), 200
+
+        ms_vals = [float(r["inference_ms"]) for r in rows if r["inference_ms"] is not None]
+        det_vals = [int(r["detections_count"] or 0) for r in rows]
+        confirmed_vals = [int(r["confirmed"] or 0) for r in rows]
+
+        ms_sorted = sorted(ms_vals)
+        p95_idx = max(0, int(len(ms_sorted) * 0.95) - 1)
+
+        return jsonify({
+            "sample_count": len(rows),
+            "inference_ms_avg": round(sum(ms_vals) / len(ms_vals), 2) if ms_vals else 0.0,
+            "inference_ms_p95": round(ms_sorted[p95_idx], 2) if ms_sorted else 0.0,
+            "detection_rate": round(sum(1 for d in det_vals if d > 0) / len(det_vals), 3) if det_vals else 0.0,
+            "confirmed_count": sum(confirmed_vals),
+        }), 200
 
     @dashboard_bp.get("/api/camera_status", endpoint="camera_status")
     @login_required

@@ -7,6 +7,7 @@ persistencia por frames, telemetrÃ­a y publicaciÃ³n MJPEG.
 
 from __future__ import annotations
 
+import collections
 import logging
 import os
 import threading
@@ -437,6 +438,7 @@ class LiveVideoProcessor:
         self._last_ts: Optional[float] = None
         self._frame_count = 0
         self._detection_times: list[float] = []
+        self._inference_ms_times: collections.deque = collections.deque(maxlen=30)
         self._persistence = DetectionPersistence(int(self.get_model_params().get("persistence_frames", 3)))
         # Tracking PTZ se ejecuta fuera de este hilo (app.py) para no bloquear video.
 
@@ -468,6 +470,44 @@ class LiveVideoProcessor:
     def get_latest(self) -> tuple[Optional[bytes], Optional[float]]:
         with self._stream_lock:
             return self._latest_jpeg, self._latest_ts
+
+    def get_metrics(self) -> dict[str, Any]:
+        """Métricas de rendimiento en tiempo real (last ~30 inference frames)."""
+        times = list(self._detection_times)
+        ms_times = list(self._inference_ms_times)
+
+        if times:
+            fps_live = 1.0 / float(times[-1]) if float(times[-1]) > 0 else 0.0
+            fps_avg = 1.0 / float(np.mean(times)) if float(np.mean(times)) > 0 else 0.0
+        else:
+            fps_live = 0.0
+            fps_avg = 0.0
+
+        inference_ms_avg = float(np.mean(ms_times)) if ms_times else 0.0
+        inference_ms_max = float(np.max(ms_times)) if ms_times else 0.0
+
+        if self.state_lock is not None and self.detection_state is not None:
+            with self.state_lock:
+                state = dict(self.detection_state)
+        else:
+            state = {}
+
+        reader_status = {}
+        try:
+            reader_status = dict(self.reader.get_status() or {})
+        except Exception:
+            pass
+
+        return {
+            "fps_live": round(fps_live, 2),
+            "fps_avg": round(fps_avg, 2),
+            "inference_ms_avg": round(inference_ms_avg, 2),
+            "inference_ms_max": round(inference_ms_max, 2),
+            "detections_total": int(state.get("detection_count") or 0),
+            "confidence_avg": round(float(state.get("avg_confidence") or 0.0), 3),
+            "camera_connected": bool(reader_status.get("is_connected", False)),
+            "last_update": str(state.get("last_update") or ""),
+        }
 
     def mjpeg_generator(self) -> Any:
         self.ensure_started()
@@ -667,6 +707,7 @@ class LiveVideoProcessor:
                     inference_ms = float(dt * 1000.0)
                     self._detection_times.append(dt)
                     self._detection_times = self._detection_times[-30:]
+                    self._inference_ms_times.append(inference_ms)
                     frame, detection_list = draw_detections(frame, results)
                     detection_list = dedupe_overlapping_detections(detection_list, iou_threshold=float(iou_value))
                 except cv2.error:
