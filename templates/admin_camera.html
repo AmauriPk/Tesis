@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RPAS Micro | Configuración de Cámara</title>
     <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}" />
     <link rel="stylesheet" href="/static/style.css" />
     <style>
         .navbar{ background:rgba(18,24,29,.95); border-bottom:1px solid var(--bd); }
@@ -32,9 +32,6 @@
         <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-3">
             <div>
                 <h3 class="fw-bold mb-1">Configuración de Cámara (Admin)</h3>
-                <div class="form-hint">
-                    Flujo recomendado: pega la <span class="kbd-pill">URL RTSP</span> → verifica credenciales → <span class="kbd-pill">Vincular y Probar</span>.
-                </div>
             </div>
             <div class="d-flex align-items-center gap-2">
                 <span class="badge text-bg-secondary d-none" id="cameraModeBadge"></span>
@@ -157,9 +154,6 @@
                         <div class="alert alert-danger mt-3 mb-0 d-none" id="testError"></div>
                         <div class="alert alert-success mt-3 mb-0 d-none" id="testSuccess"></div>
                         <div class="alert alert-warning mt-3 mb-0 d-none" id="testWarning"></div>
-                        <div class="form-hint mt-2">
-                            El test usa <code>onvif-zeep</code>. Si falla, verás un error técnico manejable (auth/timeout/host).
-                        </div>
                     </div>
                 </div>
             </div>

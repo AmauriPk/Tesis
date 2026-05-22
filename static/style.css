@@ -4,7 +4,21 @@
    Tema: Hardware Militar / Radar Terminal
    ================================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
+@font-face {
+  font-family: 'Share Tech Mono';
+  src: url('/static/vendor/fonts/ShareTechMono.woff2') format('woff2');
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Orbitron';
+  src: url('/static/vendor/fonts/Orbitron-Regular.woff2') format('woff2');
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Orbitron';
+  src: url('/static/vendor/fonts/Orbitron-Bold.woff2') format('woff2');
+  font-weight: 700; font-style: normal; font-display: swap;
+}
 
 /* ── Variables del sistema ─────────────────────────────────── */
 :root {
@@ -787,3 +801,27 @@ hr {
 .amber-pulse  { animation: amberPulse  1.20s ease-in-out infinite; }
 .neon-blink   { animation: neonBlink   1.40s ease-in-out infinite; }
 .boot-in      { animation: bootIn       .35s ease-out both; }
+
+/* ── Identidad SIRAN (login) ────────────────────────────────── */
+.siran-logo-title {
+  font-family: var(--ff-head) !important;
+  font-size: 2.8rem;
+  font-weight: 700;
+  color: var(--neon) !important;
+  letter-spacing: .25em;
+  text-shadow: 0 0 18px var(--neon-glow);
+}
+.siran-logo-sub {
+  font-size: .72rem;
+  color: var(--neon-dim);
+  letter-spacing: .08em;
+  line-height: 1.6;
+  margin-top: .25rem;
+}
+.siran-logo-sep {
+  width: 60px;
+  height: 1px;
+  background: var(--neon-dim);
+  margin: 1rem auto 0;
+  opacity: .5;
+}

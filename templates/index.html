@@ -5,13 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VIGÍA // Centro de Operaciones</title>
 
-    <!-- Preconexión de fuentes para reducir latencia -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap" rel="stylesheet" />
-
     <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}" />
     <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
@@ -19,6 +14,7 @@
         <div class="container-fluid">
             <a class="navbar-brand vigia-brand" href="#">
                 <i class="fa-solid fa-crosshairs me-2"></i>VIGÍA
+                <span style="font-size:.65rem;color:var(--mut2);margin-left:.4rem;letter-spacing:.06em;">· SIRAN</span>
             </a>
             <div class="ms-auto d-flex align-items-center gap-2">
                 {% if is_admin %}
@@ -28,8 +24,6 @@
                 {% endif %}
                 <span class="badge badge-role">
                     <i class="fa-solid fa-user me-1"></i>{{ current_user.username }}
-                    <span class="text-secondary"> | </span>
-                    <span class="mono">{{ current_user.role }}</span>
                 </span>
                 <a class="btn btn-sm btn-outline-light" href="{{ url_for('auth.logout') }}">
                     <i class="fa-solid fa-right-from-bracket me-1"></i> Salir
@@ -63,7 +57,7 @@
                         id="manual-tab" data-bs-toggle="tab" data-bs-target="#manual"
                         type="button" role="tab"
                         aria-controls="manual" aria-selected="{{ 'true' if active_tab == 'manual' else 'false' }}">
-                    <i class="fa-solid fa-upload me-1"></i> Análisis Manual
+                    <i class="fa-solid fa-upload me-1"></i> Modo Offline
                 </button>
             </li>
             <li class="nav-item" role="presentation">
@@ -71,7 +65,7 @@
                         id="live-tab" data-bs-toggle="tab" data-bs-target="#live"
                         type="button" role="tab"
                         aria-controls="live" aria-selected="{{ 'true' if active_tab == 'live' else 'false' }}">
-                    <i class="fa-solid fa-satellite-dish me-1"></i> Procesamiento de Flujo
+                    <i class="fa-solid fa-satellite-dish me-1"></i> Modo En Línea
                 </button>
             </li>
         </ul>
@@ -103,10 +97,6 @@
                                     </button>
                                 </div>
                                 <hr />
-                                <div class="form-text">
-                                    Resultados en <span class="mono-neon">static/results/</span> —
-                                    modelo de visión activo.
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -115,7 +105,7 @@
                     <div class="col-xl-8">
                         <div class="card">
                             <div class="card-header">
-                                <i class="fa-solid fa-crosshairs"></i> Resultado del modelo de visión
+                                <i class="fa-solid fa-crosshairs"></i> Resultado analizado
                             </div>
                             <div class="card-body">
                                 <div class="row g-3 align-items-start">
@@ -175,7 +165,7 @@
                     <div class="col-xl-8">
                         <div class="card">
                             <div class="card-header">
-                                <i class="fa-solid fa-eye"></i> Procesamiento de flujo — RTSP
+                                <i class="fa-solid fa-eye"></i> Flujo en Vivo — RTSP
                             </div>
                             <div class="card-body">
                                 <img id="liveImg" class="video-frame" src="/video_feed"

@@ -6,7 +6,7 @@
     <title>RPAS Micro | Admin</title>
 
     <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}" />
     <link rel="stylesheet" href="/static/style.css" />
     <style>
         .navbar{ background:rgba(18,24,29,.95); border-bottom:1px solid var(--bd); }
@@ -22,8 +22,9 @@
 <body>
     <nav class="navbar navbar-expand-lg sticky-top">
         <div class="container-fluid">
-            <span class="navbar-brand text-light fw-bold">
-                <i class="fa-solid fa-screwdriver-wrench me-2 text-warning"></i>Admin Dashboard
+            <span class="navbar-brand">
+                <span style="font-family:var(--ff-head);letter-spacing:.12em;color:var(--neon);">SIRAN</span>
+                <span style="color:var(--mut2);font-size:.8rem;margin-left:.5rem;">· Panel de Control</span>
             </span>
             <div class="ms-auto">
                 <a class="btn btn-sm btn-outline-light" href="{{ url_for('auth.logout') }}">Salir</a>
@@ -44,17 +45,17 @@
         <ul class="nav nav-pills gap-2 mb-3" id="adminMainTabs" role="tablist">
             <li class="nav-item" role="presentation">
                 <button class="nav-link active" id="tab-camera" data-bs-toggle="tab" data-bs-target="#pane-camera" type="button" role="tab">
-                    <i class="fa-solid fa-camera me-1"></i> Cámara (Hardware)
+                    <i class="fa-solid fa-camera me-1"></i> Configuración de Cámara
                 </button>
             </li>
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="tab-params" data-bs-toggle="tab" data-bs-target="#pane-params" type="button" role="tab">
-                    <i class="fa-solid fa-sliders me-1"></i> Parámetros y Métricas
+                    <i class="fa-solid fa-sliders me-1"></i> Parámetros del Modelo
                 </button>
             </li>
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="tab-dataset" data-bs-toggle="tab" data-bs-target="#pane-dataset" type="button" role="tab">
-                    <i class="fa-solid fa-images me-1"></i> Gestor de Dataset
+                    <i class="fa-solid fa-images me-1"></i> Dataset y Entrenamiento
                 </button>
             </li>
         </ul>
