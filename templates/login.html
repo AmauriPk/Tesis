@@ -7,6 +7,7 @@
     <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet" />
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}" />
     <link rel="stylesheet" href="/static/style.css" />
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='vendor/siran-logo.svg') }}">
     <style>
         body{ min-height:100vh; display:flex; align-items:center; }
     </style>
@@ -17,8 +18,12 @@
             <div class="card-body p-4">
 
                 <div class="text-center mb-4">
-                    <div class="siran-logo-title">SIRAN</div>
-                    <div class="siran-logo-sub">Sistema Integrado de Reconocimiento<br>de Aeronaves No Tripuladas</div>
+                    <img src="{{ url_for('static', filename='vendor/siran-logo.svg') }}"
+                         alt="SIRAN"
+                         style="width:180px; filter: drop-shadow(0 0 10px #00ff41); margin-bottom:.5rem;">
+                    <div class="siran-logo-sub">
+                        Sistema Integrado de Reconocimiento<br>de Aeronaves No Tripuladas
+                    </div>
                     <div class="siran-logo-sep"></div>
                 </div>
 

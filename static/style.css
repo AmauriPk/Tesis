@@ -99,7 +99,15 @@ body::after {
 }
 
 /* ── Tipografía global ──────────────────────────────────────── */
-* { font-family: var(--ff-mono) !important; }
+*:not(.fa):not(.fas):not(.far):not(.fab):not(.fal):not(.fad):not([class*="fa-"]) {
+  font-family: var(--ff-mono) !important;
+}
+
+.fa::before, .fas::before, .far::before, .fab::before,
+[class*="fa-"]::before, [class*="fa-"]::after {
+  font-family: "Font Awesome 6 Free", "Font Awesome 6 Brands" !important;
+  font-weight: 900;
+}
 
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--ff-head) !important;

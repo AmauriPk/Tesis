@@ -3,11 +3,12 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RPAS Micro | Admin</title>
+    <title>SIRAN | Panel de Control</title>
 
     <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet" />
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}" />
     <link rel="stylesheet" href="/static/style.css" />
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='vendor/siran-logo.svg') }}">
     <style>
         .navbar{ background:rgba(18,24,29,.95); border-bottom:1px solid var(--bd); }
         .form-hint{ font-size:.875rem; color:rgba(255,255,255,.72); }
@@ -22,10 +23,10 @@
 <body>
     <nav class="navbar navbar-expand-lg sticky-top">
         <div class="container-fluid">
-            <span class="navbar-brand">
-                <span style="font-family:var(--ff-head);letter-spacing:.12em;color:var(--neon);">SIRAN</span>
-                <span style="color:var(--mut2);font-size:.8rem;margin-left:.5rem;">· Panel de Control</span>
-            </span>
+            <a class="navbar-brand" href="#">
+                <img src="{{ url_for('static', filename='vendor/siran-logo.svg') }}"
+                     alt="SIRAN" height="36" style="filter: drop-shadow(0 0 6px #00ff41);">
+            </a>
             <div class="ms-auto">
                 <a class="btn btn-sm btn-outline-light" href="{{ url_for('auth.logout') }}">Salir</a>
             </div>
@@ -68,9 +69,6 @@
                         <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-3">
                             <div>
                                 <h4 class="fw-bold mb-1">Configuración de Hardware (Cámara)</h4>
-                                <div class="form-hint">
-                                    Flujo recomendado: pega la <span class="kbd-pill">URL RTSP</span> → <span class="kbd-pill">Vincular y Probar</span> → Guardar.
-                                </div>
                             </div>
                             <div class="d-flex align-items-center gap-2">
                                 <span class="badge text-bg-secondary d-none" id="cameraModeBadge"></span>
@@ -185,9 +183,6 @@
                                         <div class="alert alert-danger mt-3 mb-0 d-none" id="testError"></div>
                                         <div class="alert alert-success mt-3 mb-0 d-none" id="testSuccess"></div>
                                         <div class="alert alert-warning mt-3 mb-0 d-none" id="testWarning"></div>
-                                        <div class="form-hint mt-2">
-                                            El test usa <code>onvif-zeep</code>. Si RTSP falla pero ONVIF responde, se mostrará una advertencia.
-                                        </div>
                                     </div>
                                 </div>
                             </div>
