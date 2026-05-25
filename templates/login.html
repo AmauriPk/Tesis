@@ -7,7 +7,7 @@
     <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet" />
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}" />
     <link rel="stylesheet" href="/static/style.css" />
-    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='vendor/siran-logo.svg') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='vendor/siran_isotipo.svg') }}">
     <style>
         body{ min-height:100vh; display:flex; align-items:center; }
     </style>
@@ -18,13 +18,11 @@
             <div class="card-body p-4">
 
                 <div class="text-center mb-4">
-                    <img src="{{ url_for('static', filename='vendor/siran-logo.svg') }}"
+                    <img src="{{ url_for('static', filename='vendor/siran_logo_completo.svg') }}"
                          alt="SIRAN"
-                         style="width:280px; filter: drop-shadow(0 0 10px #00ff41); margin-bottom:.5rem;">
-                    <div class="siran-logo-sub">
-                        Sistema Integrado de Reconocimiento<br>de Aeronaves No Tripuladas
-                    </div>
-                    <div class="siran-logo-sep"></div>
+                         style="width:260px; height:auto;
+                                filter: drop-shadow(0 0 10px #00ff41);
+                                margin-bottom: 1rem;">
                 </div>
 
                 <h6 class="text-center mb-3" style="color:var(--neon-dim);letter-spacing:.15em;">

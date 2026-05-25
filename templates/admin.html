@@ -8,7 +8,7 @@
     <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet" />
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}" />
     <link rel="stylesheet" href="/static/style.css" />
-    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='vendor/siran-logo.svg') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='vendor/siran_isotipo.svg') }}">
     <style>
         .navbar{ background:rgba(18,24,29,.95); border-bottom:1px solid var(--bd); }
         .form-hint{ font-size:.875rem; color:rgba(255,255,255,.72); }
@@ -24,8 +24,8 @@
     <nav class="navbar navbar-expand-lg sticky-top">
         <div class="container-fluid">
             <a class="navbar-brand" href="#">
-                <img src="{{ url_for('static', filename='vendor/siran-logo.svg') }}"
-                     alt="SIRAN" height="32" style="filter: drop-shadow(0 0 6px #00ff41);">
+                <img src="{{ url_for('static', filename='vendor/siran_isotipo.svg') }}"
+                     alt="SIRAN" style="height:42px; width:auto; filter: drop-shadow(0 0 6px #00ff41);">
             </a>
             <div class="ms-auto">
                 <a class="btn btn-sm btn-outline-light" href="{{ url_for('auth.logout') }}">Salir</a>
