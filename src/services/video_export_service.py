@@ -33,7 +33,8 @@ def resolve_ffmpeg_bin() -> str | None:
     2) shutil.which("ffmpeg")
     3) imageio_ffmpeg.get_ffmpeg_exe() (si está instalado)
     """
-    env_path = (os.environ.get("FFMPEG_BIN") or "").strip()
+    from config import STORAGE_CONFIG
+    env_path = str(STORAGE_CONFIG.get("ffmpeg_bin", "")).strip()
     if env_path:
         try:
             if os.path.exists(env_path):

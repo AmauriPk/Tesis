@@ -31,14 +31,10 @@ class ModelParamsService:
             return dict(self.model_params)
 
     def get_detection_persistence_frames(self) -> int:
-        """
-        Mitigación de aves:
-        Requiere que la detección "persista" por N frames consecutivos antes de marcar `detected=True`.
-        """
+        """Frames consecutivos requeridos antes de marcar detected=True (mitigación de aves)."""
         try:
-            raw_dpf = os.environ.get("DETECTION_PERSISTENCE_FRAMES", "3").strip()
-            return max(1, int(raw_dpf))
-        except (ValueError, TypeError) as e:
-            logger.warning("DETECTION_PERSISTENCE_FRAMES='%s' invalid: %s, using default=3", raw_dpf, e)
+            raw = os.environ.get("DETECTION_PERSISTENCE_FRAMES", "3").strip()
+            return max(1, int(raw))
+        except (ValueError, TypeError):
             return 3
 

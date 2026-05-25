@@ -9,7 +9,7 @@ import time
 from datetime import datetime
 
 from config import _env_int
-from src.system_core import FrameRecord
+from src.system_core import FrameRecord, _open_db
 
 logger = logging.getLogger(__name__)
 
@@ -96,13 +96,8 @@ class DetectionEventWriter:
             pass
 
     def _connect(self) -> sqlite3.Connection:
-        con = sqlite3.connect(self.db_path, timeout=10, check_same_thread=False)
+        con = _open_db(self.db_path)
         con.row_factory = sqlite3.Row
-        try:
-            con.execute("PRAGMA journal_mode=WAL;")
-            con.execute("PRAGMA synchronous=NORMAL;")
-        except Exception as e:
-            logger.warning("EVENT_DB pragma error: %s", e)
         _ensure_detection_events_schema(con)
         return con
 

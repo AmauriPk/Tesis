@@ -7,6 +7,7 @@ from flask import Blueprint, Response, jsonify, redirect, render_template, reque
 from flask_login import current_user, login_required
 from config import STORAGE_CONFIG
 from src.routes import get_dep
+from src.system_core import _open_db
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -108,7 +109,7 @@ def init_dashboard_routes(**deps: Any) -> None:
         """Agrega las últimas 100 filas de inference_frames para métricas históricas."""
         db_path = str(STORAGE_CONFIG.get("db_path", "detections.db"))
         try:
-            con = sqlite3.connect(db_path, timeout=5, check_same_thread=False)
+            con = _open_db(db_path, timeout=5.0)
             con.row_factory = sqlite3.Row
             rows = con.execute(
                 """

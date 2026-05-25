@@ -1,13 +1,29 @@
 from __future__ import annotations
 
 import os
+import os.path
 from typing import Any
 
 from flask import Blueprint, abort, current_app, send_file
 from flask_login import login_required
 
 from src.routes import get_dep
-from src.services.media_service import safe_join, safe_rel_path
+
+
+def _safe_rel_path(rel_path: str) -> str:
+    rel = (rel_path or "").replace("\\", "/").lstrip("/")
+    if ".." in rel.split("/"):
+        raise ValueError("invalid_path")
+    return rel
+
+
+def _safe_join(base_dir: str, rel_path: str) -> str:
+    rel = _safe_rel_path(rel_path)
+    base = os.path.abspath(base_dir)
+    full = os.path.abspath(os.path.join(base, rel))
+    if not (full == base or full.startswith(base + os.sep)):
+        raise ValueError("invalid_path")
+    return full
 
 media_bp = Blueprint("media", __name__)
 
@@ -42,8 +58,8 @@ def init_media_routes(**deps: Any) -> None:
         Permite solo archivos dentro de `app.root_path` (bloquea traversal).
         """
         try:
-            rel = safe_rel_path(rel_path)
-            full = safe_join(os.path.abspath(current_app.root_path), rel)
+            rel = _safe_rel_path(rel_path)
+            full = _safe_join(os.path.abspath(current_app.root_path), rel)
         except Exception:
             abort(400)
         if not os.path.exists(full) or not os.path.isfile(full):

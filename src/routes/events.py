@@ -11,6 +11,7 @@ from typing import Any, Callable
 from flask import Blueprint, Response, jsonify, request
 from flask_login import login_required
 from src.routes import get_dep
+from src.system_core import _open_db
 
 logger = logging.getLogger(__name__)
 
@@ -66,14 +67,10 @@ def init_events_routes(**deps: Any) -> None:
                 logger.debug("alerts db=%s missing_db=1", db_path)
                 return jsonify({"status": "success", "alerts": alerts}), 200
 
-            con = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
+            con = _open_db(db_path)
             con.row_factory = sqlite3.Row
             try:
                 cur = con.cursor()
-                try:
-                    cur.execute("PRAGMA journal_mode=WAL;")
-                except Exception:
-                    pass
 
                 # Detecta la tabla real disponible (evita "no such table" silencioso).
                 cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -245,7 +242,7 @@ def init_events_routes(**deps: Any) -> None:
             if not os.path.exists(db_path):
                 return jsonify({"ok": True, "status": "success", "events": []}), 200
 
-            con = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
+            con = _open_db(db_path)
             con.row_factory = sqlite3.Row
             try:
                 ensure_detection_events_schema(con)
@@ -311,7 +308,7 @@ def init_events_routes(**deps: Any) -> None:
         if not os.path.exists(db_path):
             return Response(header, mimetype="text/csv")
 
-        con = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
+        con = _open_db(db_path)
         con.row_factory = sqlite3.Row
         try:
             ensure_detection_events_schema(con)
@@ -380,7 +377,7 @@ def init_events_routes(**deps: Any) -> None:
     def api_detection_summary():
         """Resumen estadístico de eventos/evidencias (para UI)."""
         db_path = get_metrics_db_path_abs()
-        evidence_dir = (os.environ.get("EVIDENCE_DIR") or _get_dep("evidence_dir")).strip() or _get_dep("evidence_dir")
+        evidence_dir = str(_get_dep("evidence_dir"))
         abs_ev = evidence_dir if os.path.isabs(evidence_dir) else os.path.join(_get_dep("app_root_path"), evidence_dir)
         abs_ev = os.path.abspath(abs_ev)
 
@@ -405,7 +402,7 @@ def init_events_routes(**deps: Any) -> None:
         if not os.path.exists(db_path):
             return jsonify(summary), 200
 
-        con = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
+        con = _open_db(db_path)
         con.row_factory = sqlite3.Row
         try:
             ensure_detection_events_schema(con)
@@ -460,7 +457,7 @@ def init_events_routes(**deps: Any) -> None:
         clear_evidence = bool(payload.get("clear_evidence"))
 
         db_path = get_metrics_db_path_abs()
-        evidence_dir = (os.environ.get("EVIDENCE_DIR") or _get_dep("evidence_dir")).strip() or _get_dep("evidence_dir")
+        evidence_dir = str(_get_dep("evidence_dir"))
         abs_ev = evidence_dir if os.path.isabs(evidence_dir) else os.path.join(_get_dep("app_root_path"), evidence_dir)
         abs_ev = os.path.abspath(abs_ev)
 
@@ -474,7 +471,7 @@ def init_events_routes(**deps: Any) -> None:
         con = None
         try:
             if os.path.exists(db_path):
-                con = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
+                con = _open_db(db_path)
                 con.row_factory = sqlite3.Row
                 ensure_detection_events_schema(con)
                 cur = con.cursor()

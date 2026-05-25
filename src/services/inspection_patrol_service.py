@@ -6,7 +6,7 @@ import threading
 import time
 from typing import Any, Callable
 
-from config import PTZ_CONFIG, _env_float
+from config import PTZ_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -103,10 +103,10 @@ class _InspectionPatrolWorker:
                     continue
 
                 now = time.time()
-                mode = (os.environ.get("PTZ_INSPECTION_MODE") or "sweep").strip().lower() or "sweep"
-                speed = float(_env_float("PTZ_INSPECTION_SPEED", 0.45))
-                duration = float(_env_float("PTZ_INSPECTION_DURATION", 4.0))
-                pause = float(_env_float("PTZ_INSPECTION_PAUSE", 0.7))
+                mode = str(PTZ_CONFIG.get("inspection_mode", "sweep")).strip().lower() or "sweep"
+                speed = float(PTZ_CONFIG.get("inspection_speed", 0.45))
+                duration = float(PTZ_CONFIG.get("inspection_duration", 4.0))
+                pause = float(PTZ_CONFIG.get("inspection_pause", 0.7))
                 if mode == "sweep":
                     speed = self._clamp(abs(float(speed)), 0.05, 1.00)
                     duration = self._clamp(float(duration), 1.0, 30.0)

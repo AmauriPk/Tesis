@@ -88,7 +88,6 @@ from src.services.ptz_state_service import PTZStateService
 from src.services.ptz_worker_service import PTZCommandWorker
 from src.services.tracking_worker_service import TrackingPTZWorker
 from src.services.media_service import safe_join as _safe_join, safe_rel_path as _safe_rel_path
-from src.services.file_cleanup_service import cleanup_old_evidence as _cleanup_old_evidence
 from src.services.model_params_service import ModelParamsService
 from src.services.session_security_service import SessionSecurityService
 from src.services.camera_config_service import CameraConfigService
@@ -171,9 +170,7 @@ os.makedirs(app.config["TOP_DETECTIONS_FOLDER"], exist_ok=True)
 os.makedirs(app.config["DATASET_RECOLECCION_FOLDER"], exist_ok=True)
 
 # Evidencia eficiente (UI de alertas recientes)
-EVIDENCE_DIR = (os.environ.get("EVIDENCE_DIR") or os.path.join("static", "evidence")).strip() or os.path.join(
-    "static", "evidence"
-)
+EVIDENCE_DIR = str(STORAGE_CONFIG["evidence_dir"])
 os.makedirs(EVIDENCE_DIR, exist_ok=True)
 
 # Dataset para mejora continua / reentrenamiento (Admin).
@@ -647,17 +644,6 @@ def diag():
             "host": FLASK_CONFIG.get("host"),
             "port": FLASK_CONFIG.get("port"),
         }
-    )
-
-# ======================== UI ========================
-def cleanup_old_evidence(*, dry_run: bool = True) -> dict:
-    return _cleanup_old_evidence(
-        root_path=app.root_path,
-        evidence_dir_default=EVIDENCE_DIR,
-        get_metrics_db_path_abs=_get_metrics_db_path_abs,
-        env_int=_env_int,
-        ensure_detection_events_schema=_ensure_detection_events_schema,
-        dry_run=bool(dry_run),
     )
 
 init_dataset_routes(

@@ -54,8 +54,12 @@ PTZ_CONFIG = {
     "k_pan":            _env_float("PTZ_K_PAN",                     0.8),
     "k_tilt":           _env_float("PTZ_K_TILT",                    0.8),
     # Inspección / patrullaje automático
-    "inspection_idle_s": _env_float("PTZ_INSPECTION_IDLE_S",        10.0),
-    "continuous_360":    _env_bool("PTZ_INSPECTION_CONTINUOUS_360",  False),
+    "inspection_idle_s":   _env_float("PTZ_INSPECTION_IDLE_S",        10.0),
+    "continuous_360":      _env_bool("PTZ_INSPECTION_CONTINUOUS_360",  False),
+    "inspection_mode":     os.environ.get("PTZ_INSPECTION_MODE", "sweep"),
+    "inspection_speed":    _env_float("PTZ_INSPECTION_SPEED",          0.45),
+    "inspection_duration": _env_float("PTZ_INSPECTION_DURATION",       4.0),
+    "inspection_pause":    _env_float("PTZ_INSPECTION_PAUSE",          0.7),
     # General
     "ptz_move_duration": _env_float("PTZ_MOVE_DURATION",            0.25),
     # Inversión de ejes (hardware-specific)
@@ -103,12 +107,15 @@ SECURITY_CONFIG = {
     # Cifrado de credenciales en DB (Fernet).
     # CRITICO: cambiar el servidor sin migrar esta clave corrompe las credenciales almacenadas.
     # Generar con: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-    "encrypt_key":            os.environ.get("SIRAN_ENCRYPT_KEY", ""),
-    "login_max_attempts":     _env_int("LOGIN_MAX_ATTEMPTS",    5),
-    "login_lockout_seconds":  _env_int("LOGIN_LOCKOUT_SECONDS", 60),
-    "login_window_seconds":   _env_int("LOGIN_WINDOW_SECONDS",  300),
+    "encrypt_key":             os.environ.get("SIRAN_ENCRYPT_KEY", ""),
+    "login_max_attempts":      _env_int("LOGIN_MAX_ATTEMPTS",    5),
+    "login_lockout_seconds":   _env_int("LOGIN_LOCKOUT_SECONDS", 60),
+    "login_window_seconds":    _env_int("LOGIN_WINDOW_SECONDS",  300),
     # Override de debug PTZ: fuerza PTZ como ready sin hardware real (peligroso en produccion)
-    "debug_ptz_ready":        _env_bool("DEBUG_PTZ_READY",       False),
+    "debug_ptz_ready":         _env_bool("DEBUG_PTZ_READY",      False),
+    "debug_camera_cfg":        _env_bool("DEBUG_CAMERA_CFG",     False),
+    "session_idle_timeout_s":  _env_int("SESSION_IDLE_TIMEOUT_SECONDS", 900),
+    "detection_persistence_frames": _env_int("DETECTION_PERSISTENCE_FRAMES", 3),
 }
 
 # ======================== CONFIGURACIÃ"N DE ALMACENAMIENTO ========================
@@ -116,6 +123,12 @@ STORAGE_CONFIG = {
     "db_path": os.environ.get("SQLITE_DB_PATH", "detections.db"),
     "upload_folder": os.environ.get("UPLOAD_FOLDER", "uploads"),
     "detections_frames_folder": os.environ.get("DETECTIONS_FRAMES_FOLDER", "detections_frames"),
+    "evidence_dir": os.environ.get("EVIDENCE_DIR", "static/evidence"),
+    "evidence_min_confidence": _env_float("EVIDENCE_MIN_CONFIDENCE", 0.85),
+    "evidence_cooldown_s":     _env_float("EVIDENCE_COOLDOWN_SECONDS", 5.0),
+    "evidence_max_files":      _env_int("EVIDENCE_MAX_FILES", 500),
+    "evidence_max_age_days":   _env_int("EVIDENCE_MAX_AGE_DAYS", 30),
+    "ffmpeg_bin":              os.environ.get("FFMPEG_BIN", ""),
     "allowed_extensions": {"png", "jpg", "jpeg", "mp4", "avi", "mov"},
     "dataset_recoleccion_folder": os.environ.get("DATASET_RECOLECCION_FOLDER", "dataset_recoleccion"),
 }

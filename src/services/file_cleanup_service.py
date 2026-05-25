@@ -5,13 +5,14 @@ import sqlite3
 import time
 from typing import Callable
 
+from src.system_core import _open_db
+
 
 def cleanup_old_evidence(
     *,
     root_path: str,
     evidence_dir_default: str,
     get_metrics_db_path_abs: Callable[[], str],
-    env_int: Callable[[str, int], int],
     ensure_detection_events_schema: Callable[[sqlite3.Connection], None],
     dry_run: bool = True,
 ) -> dict:
@@ -21,13 +22,11 @@ def cleanup_old_evidence(
     - No se ejecuta automáticamente.
     - Por defecto `dry_run=True` (solo reporta).
 
-    Nota: mantiene compatibilidad con override por env var `EVIDENCE_DIR`.
     """
-    evidence_dir = (os.environ.get("EVIDENCE_DIR") or evidence_dir_default).strip() or evidence_dir_default
-    max_files = int(env_int("EVIDENCE_MAX_FILES", 500))
-    max_age_days = int(env_int("EVIDENCE_MAX_AGE_DAYS", 30))
-    max_files = max(50, min(5000, int(max_files)))
-    max_age_days = max(1, min(365, int(max_age_days)))
+    from config import STORAGE_CONFIG
+    evidence_dir = str(evidence_dir_default)
+    max_files = max(50, min(5000, int(STORAGE_CONFIG.get("evidence_max_files", 500))))
+    max_age_days = max(1, min(365, int(STORAGE_CONFIG.get("evidence_max_age_days", 30))))
 
     abs_dir = evidence_dir
     if not os.path.isabs(abs_dir):
@@ -38,7 +37,7 @@ def cleanup_old_evidence(
     db_path = get_metrics_db_path_abs()
     try:
         if os.path.exists(db_path):
-            con = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
+            con = _open_db(db_path)
             con.row_factory = sqlite3.Row
             try:
                 ensure_detection_events_schema(con)

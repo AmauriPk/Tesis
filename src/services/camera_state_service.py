@@ -53,7 +53,8 @@ def guardar_config_camara(is_ptz: bool) -> None:
 def leer_config_camara() -> bool:
     """Lee `config_camara.json` y retorna is_ptz. Si no existe, False."""
     path = _camera_cfg_path()
-    debug = os.environ.get("DEBUG_CAMERA_CFG", "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+    from config import SECURITY_CONFIG
+    debug = bool(SECURITY_CONFIG.get("debug_camera_cfg", False))
     global _last_camera_cfg_is_ptz
     try:
         with open(path, "r", encoding="utf-8") as f:

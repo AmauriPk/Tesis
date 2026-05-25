@@ -11,24 +11,9 @@ import time
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
+from src.system_core import iou_matrix as _iou_matrix
+
 logger = logging.getLogger(__name__)
-
-
-def _iou_matrix(bboxes_a: list, bboxes_b: list) -> np.ndarray:
-    """Matriz IoU entre dos listas de bboxes (x1,y1,x2,y2). Shape: (len_a, len_b)."""
-    mat = np.zeros((len(bboxes_a), len(bboxes_b)), dtype=np.float32)
-    for i, a in enumerate(bboxes_a):
-        for j, b in enumerate(bboxes_b):
-            xi1 = max(a[0], b[0])
-            yi1 = max(a[1], b[1])
-            xi2 = min(a[2], b[2])
-            yi2 = min(a[3], b[3])
-            inter = max(0, xi2 - xi1) * max(0, yi2 - yi1)
-            area_a = (a[2] - a[0]) * (a[3] - a[1])
-            area_b = (b[2] - b[0]) * (b[3] - b[1])
-            union = area_a + area_b - inter
-            mat[i, j] = inter / union if union > 0 else 0.0
-    return mat
 
 
 class Track:

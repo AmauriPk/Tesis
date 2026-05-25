@@ -78,16 +78,6 @@ def clamp(value: float, min_val: float, max_val: float) -> float:
     return float(max(min_val, min(max_val, float(value))))
 
 
-def safe_join_path(*parts: str) -> str:
-    import os.path
-
-    joined = os.path.join(*parts)
-    normalized = os.path.normpath(joined)
-    if ".." in normalized.split(os.sep):
-        raise ValueError(f"Path traversal detected: {joined}")
-    return normalized.replace("\\", "/")
-
-
 def bbox_area(bbox: tuple[int, int, int, int]) -> int:
     x1, y1, x2, y2 = bbox
     return max(0, int(x2) - int(x1)) * max(0, int(y2) - int(y1))
@@ -97,6 +87,38 @@ def select_priority_detection(detection_list: list[dict[str, Any]]) -> dict[str,
     if not detection_list:
         return None
     return max(detection_list, key=lambda d: bbox_area(tuple(d["bbox"])))
+
+
+def iou_pair(a: tuple, b: tuple) -> float:
+    """IoU entre dos bboxes individuales en coordenadas xyxy."""
+    xi1 = max(a[0], b[0])
+    yi1 = max(a[1], b[1])
+    xi2 = min(a[2], b[2])
+    yi2 = min(a[3], b[3])
+    inter = max(0, xi2 - xi1) * max(0, yi2 - yi1)
+    area_a = (a[2] - a[0]) * (a[3] - a[1])
+    area_b = (b[2] - b[0]) * (b[3] - b[1])
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def iou_matrix(bboxes_a: list, bboxes_b: list) -> "Any":
+    """Matriz IoU entre dos listas de bboxes xyxy. Requiere numpy."""
+    import numpy as np
+    mat = np.zeros((len(bboxes_a), len(bboxes_b)), dtype=np.float32)
+    for i, a in enumerate(bboxes_a):
+        for j, b in enumerate(bboxes_b):
+            mat[i, j] = iou_pair(a, b)
+    return mat
+
+
+def _open_db(path: str, *, timeout: float = 10.0) -> sqlite3.Connection:
+    """Abre una conexión SQLite con WAL + synchronous=NORMAL + foreign_keys."""
+    con = sqlite3.connect(str(path), timeout=float(timeout), check_same_thread=False)
+    con.execute("PRAGMA journal_mode=WAL;")
+    con.execute("PRAGMA synchronous=NORMAL;")
+    con.execute("PRAGMA foreign_keys=ON;")
+    return con
 
 
 # ======================== DB (SQLAlchemy) ========================
@@ -333,11 +355,7 @@ class MetricsDBWriter:
             return
 
     def _connect(self) -> sqlite3.Connection:
-        con = sqlite3.connect(self.db_path, timeout=30, check_same_thread=False)
-        con.execute("PRAGMA journal_mode=WAL;")
-        con.execute("PRAGMA synchronous=NORMAL;")
-        con.execute("PRAGMA foreign_keys=ON;")
-        return con
+        return _open_db(self.db_path, timeout=30.0)
 
     def _ensure_schema(self, con: sqlite3.Connection) -> None:
         con.execute(

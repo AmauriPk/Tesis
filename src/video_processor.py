@@ -19,9 +19,9 @@ from typing import Any, Callable, Optional
 import cv2
 import numpy as np
 
-from config import PTZ_CONFIG, TRACKER_CONFIG, YOLO_CONFIG
+from config import PTZ_CONFIG, STORAGE_CONFIG, TRACKER_CONFIG, YOLO_CONFIG
 from src.services.tracker_service import SORTTracker
-from src.system_core import clamp, select_priority_detection
+from src.system_core import clamp, iou_pair, select_priority_detection
 
 logger = logging.getLogger(__name__)
 
@@ -84,26 +84,9 @@ def overlay_fps(frame: np.ndarray, detection_times_s: list[float]) -> None:
     )
 
 
-def bbox_iou_xyxy(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
-    """Calcula IoU para bboxes en formato (x1, y1, x2, y2)."""
-    ax1, ay1, ax2, ay2 = a
-    bx1, by1, bx2, by2 = b
-
-    ix1 = max(int(ax1), int(bx1))
-    iy1 = max(int(ay1), int(by1))
-    ix2 = min(int(ax2), int(bx2))
-    iy2 = min(int(ay2), int(by2))
-
-    iw = max(0, ix2 - ix1)
-    ih = max(0, iy2 - iy1)
-    inter = iw * ih
-    if inter <= 0:
-        return 0.0
-
-    a_area = max(0, int(ax2) - int(ax1)) * max(0, int(ay2) - int(ay1))
-    b_area = max(0, int(bx2) - int(bx1)) * max(0, int(by2) - int(by1))
-    union = a_area + b_area - inter
-    return float(inter / union) if union > 0 else 0.0
+def bbox_iou_xyxy(a: tuple, b: tuple) -> float:
+    """Alias de iou_pair — mantenido para compatibilidad con tracking_worker_service."""
+    return iou_pair(a, b)
 
 
 def dedupe_overlapping_detections(
@@ -132,82 +115,6 @@ def dedupe_overlapping_detections(
             continue
         kept.append(det)
     return kept
-
-
-def bbox_offset_norm(frame_w: int, frame_h: int, bbox_xyxy: tuple[int, int, int, int]) -> tuple[float, float]:
-    """Offset del centro del bbox respecto al centro del frame, normalizado a [-1..1]."""
-    x1, y1, x2, y2 = bbox_xyxy
-    cx = (float(x1) + float(x2)) / 2.0
-    cy = (float(y1) + float(y2)) / 2.0
-    dx = (cx - (float(frame_w) / 2.0)) / max(1.0, float(frame_w) / 2.0)
-    dy = (cy - (float(frame_h) / 2.0)) / max(1.0, float(frame_h) / 2.0)
-    return float(dx), float(dy)
-
-
-def ptz_centering_vector(
-    frame_w: int,
-    frame_h: int,
-    bbox_xyxy: tuple[int, int, int, int],
-    *,
-    tolerance_frac: float = 0.15,
-    max_speed: float = 0.60,
-) -> tuple[float, float]:
-    """
-    Tracking PTZ simple por zonas (estable):
-    - Centro del bbox vs centro del frame.
-    - Deadzone configurable por `tolerance_frac` del frame por eje.
-    - Fuera => velocidad constante en magnitud `max_speed`.
-    - Respeta PTZ_INVERT_PAN / PTZ_INVERT_TILT.
-    """
-    fw = max(1, int(frame_w))
-    fh = max(1, int(frame_h))
-    x1, y1, x2, y2 = bbox_xyxy
-
-    cx = (float(x1) + float(x2)) / 2.0
-    cy = (float(y1) + float(y2)) / 2.0
-    fx = float(fw) / 2.0
-    fy = float(fh) / 2.0
-
-    tol = float(clamp(float(tolerance_frac), 0.01, 0.90))
-    deadzone_x = float(fw) * float(tol)
-    deadzone_y = float(fh) * float(tol)
-
-    spd = float(abs(float(max_speed)))
-
-    k_pan   = float(PTZ_CONFIG["k_pan"])
-    k_tilt  = float(PTZ_CONFIG["k_tilt"])
-    min_spd = float(PTZ_CONFIG["min_speed"])
-
-    # Error normalizado [-0.5, 0.5]: (0,0) = centro del frame
-    error_x = (cx / float(fw)) - 0.5
-    error_y = (cy / float(fh)) - 0.5
-
-    def _prop_clamp(raw: float, mn: float, mx: float) -> float:
-        if abs(raw) < mn:
-            return 0.0
-        return float(max(mn, min(mx, abs(raw)))) * (1.0 if raw > 0 else -1.0)
-
-    pan = 0.0
-    if abs(error_x) >= float(tol):
-        pan = _prop_clamp(float(k_pan) * float(error_x), float(min_spd), float(spd))
-
-    tilt = 0.0
-    if abs(error_y) >= float(tol):
-        tilt = _prop_clamp(-float(k_tilt) * float(error_y), float(min_spd), float(spd))
-
-    if PTZ_CONFIG["invert_pan"]:
-        pan = -1.0 * float(pan)
-    if PTZ_CONFIG["invert_tilt"]:
-        tilt = -1.0 * float(tilt)
-
-    return float(pan), float(tilt)
-
-
-def _apply_min_ptz_speed(value: float, min_speed: float = 0.08, max_speed: float = 0.25) -> float:
-    if abs(float(value)) < 1e-6:
-        return 0.0
-    sign = 1.0 if float(value) > 0 else -1.0
-    return float(sign) * float(min(max(abs(float(value)), float(min_speed)), float(max_speed)))
 
 
 class RTSPLatestFrameReader:
@@ -560,17 +467,8 @@ class LiveVideoProcessor:
 
     def _save_evidence(self, frame: np.ndarray, detection_list: list[dict[str, Any]]) -> None:
         now = time.time()
-        try:
-            min_conf = float(os.environ.get("EVIDENCE_MIN_CONFIDENCE", "0.85") or 0.85)
-        except Exception:
-            min_conf = 0.85
-        min_conf = float(clamp(float(min_conf), 0.10, 1.00))
-
-        try:
-            cooldown_s = float(os.environ.get("EVIDENCE_COOLDOWN_SECONDS", "5") or 5.0)
-        except Exception:
-            cooldown_s = 5.0
-        cooldown_s = float(clamp(float(cooldown_s), 1.0, 60.0))
+        min_conf = float(clamp(float(STORAGE_CONFIG.get("evidence_min_confidence", 0.85)), 0.10, 1.00))
+        cooldown_s = float(clamp(float(STORAGE_CONFIG.get("evidence_cooldown_s", 5.0)), 1.0, 60.0))
 
         # Regla: no guardar evidencia por cada frame.
         # - cooldown global
@@ -601,7 +499,7 @@ class LiveVideoProcessor:
             # Ya guardamos evidencia para la detección activa y no hay mejora.
             return
 
-        rel_folder = (os.environ.get("EVIDENCE_DIR") or self.deps.detections_folder_rel).strip() or self.deps.detections_folder_rel
+        rel_folder = str(self.deps.detections_folder_rel)
         rel_folder = rel_folder.replace("\\", "/")
         abs_folder = os.path.join(self.deps.app_root_path, rel_folder)
         os.makedirs(abs_folder, exist_ok=True)
