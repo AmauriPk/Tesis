@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SIRAN | Centro de Operaciones</title>
+
+    <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}" />
+    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='vendor/siran_isotipo.svg') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg sticky-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <img src="{{ url_for('static', filename='vendor/siran_isotipo.svg') }}"
+                     alt="SIRAN" style="height:40px; width:auto; filter: drop-shadow(0 0 6px #00ff41); border:none; background:transparent;">
+            </a>
+            <div class="ms-auto d-flex align-items-center gap-2">
+                {% if is_admin %}
+                    <a class="btn btn-sm btn-outline-warning" href="{{ url_for('admin_camera.admin_dashboard') }}">
+                        <i class="fa-solid fa-screwdriver-wrench me-1"></i> Config. Cámara
+                    </a>
+                {% endif %}
+                <span class="badge badge-role">
+                    <i class="fa-solid fa-user me-1"></i>{{ current_user.username }}
+                </span>
+                <a class="btn btn-sm btn-outline-light" href="{{ url_for('auth.logout') }}">
+                    <i class="fa-solid fa-right-from-bracket me-1"></i> Salir
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Indicador global de estado — procesamiento de flujo manual -->
+    <div class="container-fluid pt-3">
+        <div id="globalProgressWrap" class="card d-none boot-in">
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div class="small">
+                        <i class="fa-solid fa-circle-notch fa-spin me-1 text-secondary" id="globalSpinner" style="display:none;"></i>
+                        <span id="globalProgressStatus">En espera</span>
+                    </div>
+                    <span class="mono" id="globalProgressText">0%</span>
+                </div>
+                <div class="progress mt-2" role="progressbar" aria-label="Progreso de procesamiento">
+                    <div id="globalProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning" style="width: 0%">0%</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container-fluid py-3">
+        <ul class="nav nav-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link {% if active_tab == 'manual' %}active{% endif %}"
+                        id="manual-tab" data-bs-toggle="tab" data-bs-target="#manual"
+                        type="button" role="tab"
+                        aria-controls="manual" aria-selected="{{ 'true' if active_tab == 'manual' else 'false' }}">
+                    <i class="fa-solid fa-upload me-1"></i> Modo Offline
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link {% if active_tab == 'live' %}active{% endif %}"
+                        id="live-tab" data-bs-toggle="tab" data-bs-target="#live"
+                        type="button" role="tab"
+                        aria-controls="live" aria-selected="{{ 'true' if active_tab == 'live' else 'false' }}">
+                    <i class="fa-solid fa-satellite-dish me-1"></i> Modo En Línea
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content">
+
+            <!-- ═══════════════ ANÁLISIS MANUAL ═══════════════ -->
+            <div class="tab-pane fade {% if active_tab == 'manual' %}show active{% endif %}"
+                 id="manual" role="tabpanel" aria-labelledby="manual-tab">
+                <div class="row g-3">
+
+                    <!-- Panel de carga -->
+                    <div class="col-xl-4">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fa-solid fa-file-arrow-up"></i> Subir imagen / video
+                            </div>
+                            <div class="card-body">
+                                <div id="flash-area"></div>
+                                <div class="mb-3">
+                                    <label class="form-label">Archivo (.jpg / .png / .mp4)</label>
+                                    <input class="form-control" type="file" id="fileInput"
+                                           accept=".jpg,.jpeg,.png,.mp4,.avi,.mov" />
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-outline-light" id="btnReset" type="button"
+                                            title="Limpiar">
+                                        <i class="fa-solid fa-rotate me-1"></i> Limpiar
+                                    </button>
+                                </div>
+                                <hr />
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Panel de resultado -->
+                    <div class="col-xl-8">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fa-solid fa-crosshairs"></i> Resultado analizado
+                            </div>
+                            <div class="card-body">
+                                <div class="row g-3 align-items-start">
+                                    <div class="col-lg-8">
+                                        <img id="resultImage" class="video-frame d-none" alt="Resultado imagen" />
+                                         <video id="resultVideo" class="video-frame d-none" controls>
+                                             <source id="resultVideoSource" type="video/mp4" />
+                                         </video>
+                                         <a class="btn btn-sm btn-outline-warning mt-2 d-none" id="downloadResultVideo" target="_blank">
+                                             <i class="fa-solid fa-download me-1"></i> Descargar video procesado
+                                         </a>
+                                         <a class="btn btn-sm btn-outline-light mt-2 d-none" id="openResultVideoTab" target="_blank" rel="noopener">
+                                             <i class="fa-solid fa-up-right-from-square me-1"></i> Abrir video en nueva pestaña
+                                         </a>
+                                         <div class="mt-3 d-none" id="topDetectionsSection">
+                                             <h6 class="mb-2">Top 10 Detecciones — Mayor Confianza</h6>
+                                             <div class="row g-2" id="topDetectionsGrid"></div>
+                                         </div>
+                                    </div>
+                                    <div class="col-lg-4">
+                                        <div class="card">
+                                            <div class="card-header">
+                                                <i class="fa-solid fa-chart-bar"></i> Métricas
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="d-flex justify-content-between mb-2">
+                                                    <span class="text-secondary">Detecciones</span>
+                                                    <span class="metric-value" id="mDet">0</span>
+                                                </div>
+                                                <div class="d-flex justify-content-between mb-2">
+                                                    <span class="text-secondary">Confianza prom.</span>
+                                                    <span class="metric-value" id="mConf">0%</span>
+                                                </div>
+                                                <div class="d-flex justify-content-between mb-3">
+                                                    <span class="text-secondary">Frames</span>
+                                                    <span class="metric-value" id="mFrames">—</span>
+                                                </div>
+                                                <a class="btn btn-outline-warning w-100 d-none" id="btnDownload" target="_blank">
+                                                    <i class="fa-solid fa-download me-1"></i> Descargar
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══════════════ PROCESAMIENTO DE FLUJO ══════════ -->
+            <div class="tab-pane fade {% if active_tab == 'live' %}show active{% endif %}"
+                 id="live" role="tabpanel" aria-labelledby="live-tab">
+                <div class="row g-3">
+
+                    <!-- Feed RTSP -->
+                    <div class="col-xl-8">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fa-solid fa-eye"></i> Flujo en Vivo
+                            </div>
+                            <div class="card-body">
+                                <img id="liveImg" class="video-frame" src="/video_feed"
+                                     alt="Flujo de video en procesamiento" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Columna derecha: estado + PTZ -->
+                    <div class="col-xl-4">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="text-secondary" style="font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;">Hardware</span>
+                            <span id="hwBadge" class="badge">Cámara: --</span>
+                        </div>
+
+                        <!-- Panel de estado del sistema (operador) -->
+                        <div class="card system-status-panel mb-3">
+                            <div class="card-header">
+                                <i class="fa-solid fa-gauge-high"></i> Sistema
+                            </div>
+                            <div class="card-body">
+                                <div class="system-status-grid">
+                                    <div class="system-status-item">
+                                        <div class="system-status-label">Cámara</div>
+                                        <div id="sysCamConn" class="system-status-value status-muted">—</div>
+                                    </div>
+                                    <div class="system-status-item">
+                                        <div class="system-status-label">Tipo</div>
+                                        <div id="sysCamType" class="system-status-value status-muted">—</div>
+                                    </div>
+                                    <div class="system-status-item">
+                                        <div class="system-status-label">PTZ</div>
+                                        <div id="sysPtzReady" class="system-status-value status-muted">—</div>
+                                    </div>
+                                    <div class="system-status-item">
+                                        <div class="system-status-label">Tracking</div>
+                                        <div id="sysTracking" class="system-status-value status-muted">—</div>
+                                    </div>
+                                    <div class="system-status-item">
+                                        <div class="system-status-label">Inspección</div>
+                                        <div id="sysInspection" class="system-status-value status-muted">—</div>
+                                    </div>
+                                    <div class="system-status-item">
+                                        <div class="system-status-label">Última detección</div>
+                                        <div id="sysLastDet" class="system-status-value status-muted">—</div>
+                                    </div>
+                                </div>
+                                <div class="system-status-footer mt-2">
+                                    <span class="text-secondary">Estado general</span>
+                                    <span id="sysGeneral" class="system-status-value status-muted">—</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Panel de estado -->
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fa-solid fa-bell"></i> Alertas / Estado
+                            </div>
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="text-secondary">Estado</span>
+                                    <div id="pillStatus" class="status-pill ok">Zona despejada</div>
+                                </div>
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span class="text-secondary">Origen</span>
+                                    <span class="mono-neon" id="sMode">fixed</span>
+                                </div>
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span class="text-secondary">Detecciones</span>
+                                    <span class="mono-neon" id="sCount">0</span>
+                                </div>
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span class="text-secondary">Confianza</span>
+                                    <span class="mono-neon" id="sConf">0%</span>
+                                </div>
+                                <div class="d-flex justify-content-between">
+                                    <span class="text-secondary">Última</span>
+                                    <span class="mono-neon" id="sLast">—</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Panel de control PTZ -->
+                        <div class="card mt-3" id="ptzPanel" style="display:none;">
+                            <div class="card-header">
+                                <i class="fa-solid fa-arrows-to-circle"></i> Control PTZ
+                            </div>
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <span class="text-secondary">Seguimiento — Modelo de visión</span>
+                                    <div class="form-check form-switch m-0">
+                                        <input class="form-check-input" type="checkbox" role="switch"
+                                               id="autoTrackingToggle" />
+                                    </div>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <span class="text-secondary">Inspección automática</span>
+                                    <div class="form-check form-switch m-0">
+                                        <input class="form-check-input" type="checkbox" role="switch"
+                                               id="inspectionToggle" />
+                                    </div>
+                                </div>
+
+                                <!-- Joystick PTZ -->
+                                <div class="d-grid gap-2" style="grid-template-columns:1fr 1fr 1fr;">
+                                    <div></div>
+                                    <button class="btn ptz-btn" id="ptzUp" type="button" title="Arriba">
+                                        <i class="fa-solid fa-chevron-up"></i>
+                                    </button>
+                                    <div></div>
+
+                                    <button class="btn ptz-btn" id="ptzLeft" type="button" title="Izquierda">
+                                        <i class="fa-solid fa-chevron-left"></i>
+                                    </button>
+                                    <button class="btn ptz-btn-stop" id="ptzStop" type="button" title="Detener">
+                                        <i class="fa-solid fa-stop"></i>
+                                    </button>
+                                    <button class="btn ptz-btn" id="ptzRight" type="button" title="Derecha">
+                                        <i class="fa-solid fa-chevron-right"></i>
+                                    </button>
+
+                                    <div></div>
+                                    <button class="btn ptz-btn" id="ptzDown" type="button" title="Abajo">
+                                        <i class="fa-solid fa-chevron-down"></i>
+                                    </button>
+                                    <div></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Panel de alertas recientes -->
+                    <div class="col-xl-4">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fa-solid fa-table-list"></i> Alertas Recientes
+                            </div>
+                            <div class="card-body">
+                                <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                                    <span class="badge text-bg-dark border" id="summaryEvents">Eventos: -</span>
+                                    <span class="badge text-bg-dark border" id="summaryEvidence">Con evidencia: -</span>
+                                    <span class="badge text-bg-dark border" id="summaryMaxConf">Conf máx: -</span>
+                                </div>
+                                <div class="d-flex gap-2 mb-2">
+                                    <button class="btn btn-sm btn-outline-info" id="btnAlertsEvents" type="button">
+                                        Eventos
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" id="btnAlertsRaw" type="button">
+                                        Ver registros técnicos
+                                    </button>
+                                    <a class="btn btn-sm btn-outline-success ms-auto" id="btnExportEventsCsv"
+                                       href="/api/export_detection_events.csv" target="_blank" rel="noopener">
+                                        Exportar eventos CSV
+                                    </a>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-dark table-hover table-sm align-middle mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>ID</th>
+                                                <th>Inicio</th>
+                                                <th>Fin</th>
+                                                <th>Conf. máx</th>
+                                                <th>Detecciones</th>
+                                                <th>BBox</th>
+                                                <th>Evidencia</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="recentAlertsBody">
+                                            <tr><td colspan="7" class="text-secondary">Sin alertas.</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="form-text mt-2">
+                                    Actualización automática. Por defecto se muestran eventos agrupados.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: vista ampliada Top 10 -->
+    <div class="modal fade" id="imagenModal" tabindex="-1"
+         aria-labelledby="imagenModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="imagenModalLabel">
+                        <i class="fa-solid fa-expand me-2"></i>Vista Ampliada — Detección
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"
+                            aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <img id="imagenExpandida" src="" alt="Imagen expandida" class="img-fluid"
+                         style="max-width:100%;max-height:85vh;object-fit:contain;margin:auto;display:block;" />
+                </div>
+                <div class="modal-footer justify-content-between">
+                    <span id="confianzaTexto" class="mono-neon">Confianza: —</span>
+                    <button type="button" class="btn btn-outline-light"
+                            data-bs-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: evidencia de detección -->
+    <div class="modal fade" id="evidenceModal" tabindex="-1"
+         aria-labelledby="evidenceModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="evidenceModalLabel">
+                        <i class="fa-solid fa-camera me-2"></i>Evidencia de Detección
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"
+                            aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <img id="evidenceImage" src="" class="img-fluid" alt="Evidencia" />
+                    <div id="evidenceMeta" class="form-text mt-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
+    <script src="/static/dashboard.js" defer></script>
+</body>
+</html>

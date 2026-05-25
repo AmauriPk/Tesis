@@ -64,7 +64,7 @@ def init_dashboard_routes(**deps: Any) -> None:
         if active_tab not in {"live", "manual"}:
             active_tab = "live"
         return render_template(
-            "index.html",
+            "operador.html",
             is_admin=False,
             camera_type=camera_type_str,
             current_user=current_user,
