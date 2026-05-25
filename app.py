@@ -240,16 +240,14 @@ def role_required(*roles: str):
     """Restringe una ruta a uno o más roles (`admin`, `operator`)."""
 
     def decorator(fn):
-        """Decorador real aplicado sobre la función de ruta."""
-
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            """Wrapper que verifica autenticación y rol antes de ejecutar la ruta."""
             if not current_user.is_authenticated:
                 return login_manager.unauthorized()
             if current_user.role not in roles:
-                flash("Acceso denegado: permisos insuficientes.", "danger")
-                return redirect(url_for("index"))
+                if not session.get("_logout_in_progress"):
+                    flash("Acceso denegado: permisos insuficientes.", "danger")
+                return redirect(url_for("auth.login"))
             return fn(*args, **kwargs)
 
         return wrapper

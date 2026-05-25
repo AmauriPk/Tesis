@@ -6,7 +6,7 @@ import time
 from typing import Any
 from urllib.parse import urlparse
 
-from flask import Blueprint, flash, redirect, render_template, request, session, url_for
+from flask import Blueprint, flash, get_flashed_messages, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 from src.routes import get_dep
 from config import SECURITY_CONFIG
@@ -110,6 +110,10 @@ def init_auth_routes(**deps: Any) -> None:
         if current_user.is_authenticated:
             return redirect(url_for("dashboard.index"))
 
+        if request.method == "GET":
+            if session.pop("_logout_in_progress", False) and not request.args.get("next"):
+                get_flashed_messages()
+
         if request.method == "POST":
             now = time.time()
             max_attempts = SECURITY_CONFIG["login_max_attempts"]
@@ -161,4 +165,6 @@ def init_auth_routes(**deps: Any) -> None:
     def logout():
         """Cierra sesión."""
         logout_user()
+        session.clear()
+        session["_logout_in_progress"] = True
         return redirect(url_for("auth.login"))
