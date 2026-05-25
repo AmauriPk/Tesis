@@ -112,6 +112,10 @@ def app(monkeypatch):
     def idx_stub():
         return "stub", 200
 
+    @dash.get("/operador_stub", endpoint="operador")
+    def operador_stub():
+        return "stub", 200
+
     app.register_blueprint(dash)
 
     @app.get("/protected")

@@ -108,7 +108,9 @@ def init_auth_routes(**deps: Any) -> None:
     def login():
         """Login simple (Flask-Login)."""
         if current_user.is_authenticated:
-            return redirect(url_for("dashboard.index"))
+            if current_user.role == "admin":
+                return redirect(url_for("admin_camera.admin_dashboard"))
+            return redirect(url_for("dashboard.operador"))
 
         if request.method == "GET":
             if session.pop("_logout_in_progress", False) and not request.args.get("next"):
@@ -151,9 +153,11 @@ def init_auth_routes(**deps: Any) -> None:
                 if next_url:
                     parsed = urlparse(next_url)
                     is_safe = (parsed.scheme == "") and (parsed.netloc == "")
-                    if is_safe and next_url not in {"/", "/?tab=live"}:
+                    if is_safe and next_url not in {"/", "/?tab=live", "/operador"}:
                         return redirect(next_url)
-                return redirect(url_for("dashboard.index", tab="live"))
+                if user.role == "admin":
+                    return redirect(url_for("admin_camera.admin_dashboard"))
+                return redirect(url_for("dashboard.operador"))
             # Credenciales inválidas (incluye usuario inexistente).
             _record_failed_attempt(key, now, max_attempts=max_attempts, window_s=window_s, lockout_s=lockout_s)
             flash("Credenciales inválidas.", "danger")

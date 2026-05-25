@@ -46,11 +46,18 @@ def init_dashboard_routes(**deps: Any) -> None:
     @dashboard_bp.route("/", endpoint="index")
     @login_required
     def index():
-        """Dashboard principal (manual + live). Operador-only por regla de negocio."""
+        """Redirige a la vista apropiada según rol."""
+        if current_user.role == "admin":
+            return redirect(url_for("admin_camera.admin_dashboard"))
+        return redirect(url_for("dashboard.operador"))
+
+    @dashboard_bp.route("/operador", endpoint="operador")
+    @login_required
+    def operador():
+        """Vista dedicada del operador."""
         if current_user.role == "admin":
             return redirect(url_for("admin_camera.admin_dashboard"))
         _ = get_or_create_camera_config()
-        # Fuente de verdad: config_camara.json (evita sobrescrituras por DB / memoria volátil).
         is_ptz = bool(leer_config_camara())
         camera_type_str = "ptz" if is_ptz else "fixed"
         active_tab = (request.args.get("tab") or "").strip().lower() or "live"
@@ -58,7 +65,7 @@ def init_dashboard_routes(**deps: Any) -> None:
             active_tab = "live"
         return render_template(
             "index.html",
-            is_admin=(current_user.role == "admin"),
+            is_admin=False,
             camera_type=camera_type_str,
             current_user=current_user,
             active_tab=active_tab,

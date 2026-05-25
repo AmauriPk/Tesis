@@ -83,6 +83,10 @@ def app():
     def dashboard_index_stub():
         return "stub", 200
 
+    @dashboard_bp.get("/operador_stub", endpoint="operador")
+    def dashboard_operador_stub():
+        return "stub", 200
+
     app.register_blueprint(dashboard_bp)
 
     @app.get("/protected")
