@@ -155,12 +155,3 @@ def make_browser_compatible_mp4(input_path: str, output_path: str) -> tuple[bool
         logger.error("video_transcode error: %s", str(e) or e.__class__.__name__)
         return False, "exception"
 
-
-def is_valid_video_file(path: str | None) -> bool:
-    """Devuelve True si `path` existe y tiene tamaño > 0."""
-    if not path:
-        return False
-    try:
-        return os.path.exists(path) and int(os.path.getsize(path) or 0) > 0
-    except Exception:
-        return False

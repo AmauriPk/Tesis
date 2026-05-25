@@ -144,7 +144,19 @@ DATASET_RECOLECCION_FOLDER = STORAGE_CONFIG.get("dataset_recoleccion_folder") or
 )
 DATASET_LIMPIAS_INBOX_DIR = os.path.join(DATASET_RECOLECCION_FOLDER, "limpias")
 
+# ======================== CONFIGURACIÓN APP ========================
+APP_CONFIG = {
+    "log_dir":                 os.environ.get("LOG_DIR", "logs"),
+    "database_url":            os.environ.get("DATABASE_URL", "sqlite:///app.db"),
+    "session_cookie_samesite": os.environ.get("SESSION_COOKIE_SAMESITE", "Strict"),
+    "session_cookie_secure":   os.environ.get("SESSION_COOKIE_SECURE", "").strip().lower() in {
+                                   "1", "true", "t", "yes", "y", "on"},
+    "metrics_enabled":         os.environ.get("METRICS_LOGGING", "1").strip().lower()
+                               not in {"0", "false", "no", "off"},
+}
+
 __all__ = [
+    "APP_CONFIG",
     "FLASK_CONFIG",
     "ONVIF_CONFIG",
     "PTZ_CONFIG",

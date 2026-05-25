@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}SIRAN{% endblock %}</title>
+    <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}" />
+    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='vendor/siran_isotipo.svg') }}">
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg sticky-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <img src="{{ url_for('static', filename='vendor/siran_isotipo.svg') }}"
+                     alt="SIRAN"
+                     style="height:40px; width:auto; filter: drop-shadow(0 0 6px #00ff41); border:none; background:transparent;">
+            </a>
+            <div class="ms-auto d-flex align-items-center gap-2">
+                {% block navbar_actions %}{% endblock %}
+                <a class="btn btn-sm btn-outline-light" href="{{ url_for('auth.logout') }}">
+                    <i class="fa-solid fa-right-from-bracket me-1"></i>Salir
+                </a>
+            </div>
+        </div>
+    </nav>
+    {% block content %}{% endblock %}
+    <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

@@ -6,6 +6,6 @@ Submodulos:
 - crypto_service: Cifrado/descifrado de credenciales con Fernet.
 - camera_config_service: Gestión de la configuración de cámara en base de datos.
 - camera_state_service: Estado de la cámara (JSON persistido).
-- ptz_capability_service: Autodescubrimiento ONVIF y estado PTZ.
+- ptz_service: Autodescubrimiento ONVIF, estado PTZ y capacidades (PTZCapabilityService + PTZStateService).
 - session_security_service: Gestión de sesiones y tiempo de inactividad.
 """

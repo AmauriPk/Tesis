@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 
-from src.services.ptz_capability_service import PTZCapabilityService
+from src.services.ptz_service import PTZCapabilityService
 
 
 class _Cfg:

@@ -1,14 +1,8 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SIRAN | Panel de Control</title>
+{% extends "base.html" %}
 
-    <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}" />
-    <link rel="stylesheet" href="/static/style.css" />
-    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='vendor/siran_isotipo.svg') }}">
+{% block title %}SIRAN | Panel de Control{% endblock %}
+
+{% block extra_head %}
     <style>
         .navbar{ background:rgba(18,24,29,.95); border-bottom:1px solid var(--bd); }
         .form-hint{ font-size:.875rem; color:rgba(255,255,255,.72); }
@@ -19,20 +13,9 @@
         .lock-note{ display:none; align-items:center; gap:.5rem; color:rgba(255,255,255,.78); font-size:.9rem; }
         .value-pill{ font-variant-numeric: tabular-nums; }
     </style>
-</head>
-<body>
-    <nav class="navbar navbar-expand-lg sticky-top">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="#">
-                <img src="{{ url_for('static', filename='vendor/siran_isotipo.svg') }}"
-                     alt="SIRAN" style="height:40px; width:auto; filter: drop-shadow(0 0 6px #00ff41); border:none; background:transparent;">
-            </a>
-            <div class="ms-auto">
-                <a class="btn btn-sm btn-outline-light" href="{{ url_for('auth.logout') }}">Salir</a>
-            </div>
-        </div>
-    </nav>
+{% endblock %}
 
+{% block content %}
     <div class="container-fluid py-4" style="max-width: 1280px;">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
@@ -406,8 +389,9 @@
             </div>
         </div>
     </div>
+{% endblock %}
 
-    <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
+{% block extra_scripts %}
     <script>
         window.__CAMERA_CFG__ = { api_test_url: "{{ url_for('admin_camera.api_test_connection') }}" };
         window.__MODEL_PARAMS_CFG__ = {
@@ -521,5 +505,4 @@
         }
     }());
     </script>
-</body>
-</html>
+{% endblock %}

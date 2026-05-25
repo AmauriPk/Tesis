@@ -22,29 +22,7 @@ import time
 from datetime import datetime
 from functools import wraps
 
-
-def setup_logging() -> None:
-    log_dir = os.environ.get("LOG_DIR", "logs")
-    os.makedirs(log_dir, exist_ok=True)
-    fmt = logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(fmt)
-    fh = logging.handlers.RotatingFileHandler(
-        os.path.join(log_dir, "siran.log"),
-        maxBytes=5 * 1024 * 1024,
-        backupCount=3,
-        encoding="utf-8",
-    )
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(fmt)
-    root.addHandler(ch)
-    root.addHandler(fh)
+from src.services.bootstrap_service import setup_logging, load_or_create_secret_key, bootstrap_users
 
 setup_logging()
 
@@ -67,8 +45,8 @@ from flask_login import (
     login_required,
 )
 
-from config import FLASK_CONFIG, ONVIF_CONFIG, PTZ_CONFIG, RTSP_CONFIG, SECURITY_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG, _env_float, _env_int
-from src.system_core import CameraConfig, FrameRecord, MetricsDBWriter, PTZController, User, db
+from config import APP_CONFIG, FLASK_CONFIG, ONVIF_CONFIG, PTZ_CONFIG, RTSP_CONFIG, SECURITY_CONFIG, STORAGE_CONFIG, VIDEO_CONFIG, YOLO_CONFIG, DATASET_TRAINING_ROOT, _env_float, _env_int
+from src.system_core import CameraConfig, FrameRecord, MetricsDBWriter, PTZController, User, clamp as _clamp, db
 from src.video_processor import LiveStreamDeps, LiveVideoProcessor, RTSPLatestFrameReader
 from src.services.camera_state_service import (
     init_camera_state_service,
@@ -84,14 +62,13 @@ from src.services.detection_event_service import (
     _parse_iso_ts_to_epoch,
 )
 from src.services.inspection_patrol_service import _InspectionPatrolWorker
-from src.services.ptz_state_service import PTZStateService
+from src.services.ptz_service import PTZStateService, PTZCapabilityService
 from src.services.ptz_worker_service import PTZCommandWorker
 from src.services.tracking_worker_service import TrackingPTZWorker
-from src.services.media_service import safe_join as _safe_join, safe_rel_path as _safe_rel_path
+from src.routes.media import _safe_join, _safe_rel_path
 from src.services.model_params_service import ModelParamsService
 from src.services.session_security_service import SessionSecurityService
 from src.services.camera_config_service import CameraConfigService
-from src.services.ptz_capability_service import PTZCapabilityService
 from src.routes.analysis import analysis_bp, init_analysis_routes
 from src.routes.events import events_bp, init_events_routes
 from src.routes.dataset import dataset_bp, init_dataset_routes
@@ -116,19 +93,7 @@ if not SECURITY_CONFIG["encrypt_key"]:
 app = Flask(__name__)
 
 _secret_key_file = os.path.join("instance", ".secret_key")
-
-def _load_or_create_secret_key() -> str:
-    if os.path.exists(_secret_key_file):
-        with open(_secret_key_file, "r") as f:
-            return f.read().strip()
-    key = secrets.token_hex(32)
-    os.makedirs("instance", exist_ok=True)
-    with open(_secret_key_file, "w") as f:
-        f.write(key)
-    logger.info("FLASK_SECRET_KEY generada y guardada en %s", _secret_key_file)
-    return key
-
-app.secret_key = os.environ.get("FLASK_SECRET_KEY") or _load_or_create_secret_key()
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or load_or_create_secret_key(_secret_key_file)
 
 # Identificador volátil por arranque: invalida cookies/sesiones previas tras reinicio.
 session_security_service = SessionSecurityService()
@@ -136,20 +101,13 @@ SESSION_BOOT_ID = session_security_service.boot_id
 
 init_camera_state_service(root_path=app.root_path)
 
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///app.db")
+app.config["SQLALCHEMY_DATABASE_URI"] = APP_CONFIG["database_url"]
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 app.config["SESSION_PERMANENT"] = False
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = os.environ.get("SESSION_COOKIE_SAMESITE", "Strict")
-app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "").strip().lower() in {
-    "1",
-    "true",
-    "t",
-    "yes",
-    "y",
-    "on",
-}
+app.config["SESSION_COOKIE_SAMESITE"] = APP_CONFIG["session_cookie_samesite"]
+app.config["SESSION_COOKIE_SECURE"] = APP_CONFIG["session_cookie_secure"]
 
 if FLASK_CONFIG.get("debug"):
     # En desarrollo: recargar templates y evitar caché agresiva de estáticos.
@@ -174,7 +132,6 @@ EVIDENCE_DIR = str(STORAGE_CONFIG["evidence_dir"])
 os.makedirs(EVIDENCE_DIR, exist_ok=True)
 
 # Dataset para mejora continua / reentrenamiento (Admin).
-DATASET_TRAINING_ROOT = os.environ.get("DATASET_TRAINING_ROOT", "dataset_entrenamiento")
 DATASET_NEGATIVE_DIR = os.path.join(DATASET_TRAINING_ROOT, "train", "images")
 DATASET_POSITIVE_PENDING_DIR = os.path.join(DATASET_TRAINING_ROOT, "pending", "images")
 os.makedirs(DATASET_NEGATIVE_DIR, exist_ok=True)
@@ -277,44 +234,12 @@ def _normalized_onvif_port(port: int | None) -> int:
 def get_or_create_camera_config() -> CameraConfig:
     return camera_config_service.get_or_create_camera_config()
 
-def bootstrap_users() -> None:
-    """Crea usuarios por defecto en primera ejecución (solo si la tabla está vacía)."""
-    if User.query.count() > 0:
-        return
-
-    admin = User(username="admin", role="admin")
-    admin_pw_env = (os.environ.get("DEFAULT_ADMIN_PASSWORD") or "").strip()
-    admin_pw = admin_pw_env or "admin123"
-    if not admin_pw_env or admin_pw == "admin123":
-        logger.warning(
-            "Usando password por defecto para admin. Configura DEFAULT_ADMIN_PASSWORD. "
-            "password_configurada=%s password_len=%s",
-            bool(admin_pw_env),
-            len(admin_pw),
-        )
-    admin.set_password(admin_pw)
-    operator = User(username="operador", role="operator")
-    operator_pw_env = (os.environ.get("DEFAULT_OPERATOR_PASSWORD") or "").strip()
-    operator_pw = operator_pw_env or "operador123"
-    if not operator_pw_env or operator_pw == "operador123":
-        logger.warning(
-            "Usando password por defecto para operador. Configura DEFAULT_OPERATOR_PASSWORD. "
-            "password_configurada=%s password_len=%s",
-            bool(operator_pw_env),
-            len(operator_pw),
-        )
-    operator.set_password(operator_pw)
-
-    db.session.add(admin)
-    db.session.add(operator)
-    db.session.commit()
-
-    logger.info("Usuarios creados: admin (role=admin), operador (role=operator)")
-
 # ======================== YOLO MODEL ========================
+_METRICS_ENABLED = APP_CONFIG["metrics_enabled"]
+
 _metrics_writer = MetricsDBWriter(
     STORAGE_CONFIG.get("db_path", "detections.db"),
-    enabled=(os.environ.get("METRICS_LOGGING", "1").strip().lower() not in {"0", "false", "no", "off"}),
+    enabled=_METRICS_ENABLED,
 )
 
 def _get_metrics_db_path_abs() -> str:
@@ -327,9 +252,7 @@ def _get_metrics_db_path_abs() -> str:
 
 _event_writer = DetectionEventWriter(
     _get_metrics_db_path_abs(),
-    enabled=(
-        os.environ.get("METRICS_LOGGING", "1").strip().lower() not in {"0", "false", "no", "off"}
-    ),
+    enabled=_METRICS_ENABLED,
     gap_seconds=float(_env_float("EVENT_GAP_SECONDS", 3.0)),
 )
 
@@ -496,10 +419,6 @@ init_model_params_routes(
     update_model_params=update_model_params,
 )
 app.register_blueprint(model_params_bp)
-
-def _clamp(v: float, lo: float, hi: float) -> float:
-    """Limita un valor float al rango [lo, hi]."""
-    return float(max(lo, min(hi, v)))
 
 ## Worker de patrullaje movido a `src/services/inspection_patrol_service.py`
 

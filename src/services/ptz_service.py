@@ -177,15 +177,6 @@ class PTZCapabilityService:
         with self.state_lock:
             return str(self.camera_source_mode)
 
-    def get_onvif_probe_status(self) -> dict:
-        with self.state_lock:
-            return {
-                "last_probe_at": self.onvif_last_probe_at,
-                "last_probe_error": self.onvif_last_probe_error,
-                "is_ptz_capable": bool(self.is_ptz_capable),
-                "camera_source_mode": str(self.camera_source_mode),
-            }
-
     def probe_onvif_ptz_capability(self) -> bool:
         cfg = self.get_or_create_camera_config()
         host = (getattr(cfg, "onvif_host", None) or "").strip()

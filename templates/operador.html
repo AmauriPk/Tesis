@@ -1,38 +1,19 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SIRAN | Centro de Operaciones</title>
+{% extends "base.html" %}
 
-    <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}" />
-    <link rel="stylesheet" href="/static/style.css" />
-    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='vendor/siran_isotipo.svg') }}">
-</head>
-<body>
-    <nav class="navbar navbar-expand-lg sticky-top">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="#">
-                <img src="{{ url_for('static', filename='vendor/siran_isotipo.svg') }}"
-                     alt="SIRAN" style="height:40px; width:auto; filter: drop-shadow(0 0 6px #00ff41); border:none; background:transparent;">
-            </a>
-            <div class="ms-auto d-flex align-items-center gap-2">
-                {% if is_admin %}
-                    <a class="btn btn-sm btn-outline-warning" href="{{ url_for('admin_camera.admin_dashboard') }}">
-                        <i class="fa-solid fa-screwdriver-wrench me-1"></i> Config. Cámara
-                    </a>
-                {% endif %}
-                <span class="badge badge-role">
-                    <i class="fa-solid fa-user me-1"></i>{{ current_user.username }}
-                </span>
-                <a class="btn btn-sm btn-outline-light" href="{{ url_for('auth.logout') }}">
-                    <i class="fa-solid fa-right-from-bracket me-1"></i> Salir
-                </a>
-            </div>
-        </div>
-    </nav>
+{% block title %}SIRAN | Centro de Operaciones{% endblock %}
 
+{% block navbar_actions %}
+    {% if is_admin %}
+        <a class="btn btn-sm btn-outline-warning" href="{{ url_for('admin_camera.admin_dashboard') }}">
+            <i class="fa-solid fa-screwdriver-wrench me-1"></i> Config. Cámara
+        </a>
+    {% endif %}
+    <span class="badge badge-role">
+        <i class="fa-solid fa-user me-1"></i>{{ current_user.username }}
+    </span>
+{% endblock %}
+
+{% block content %}
     <!-- Indicador global de estado — procesamiento de flujo manual -->
     <div class="container-fluid pt-3">
         <div id="globalProgressWrap" class="card d-none boot-in">
@@ -397,8 +378,8 @@
             </div>
         </div>
     </div>
+{% endblock %}
 
-    <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
+{% block extra_scripts %}
     <script src="/static/dashboard.js" defer></script>
-</body>
-</html>
+{% endblock %}

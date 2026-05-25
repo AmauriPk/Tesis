@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from src.services.ptz_state_service import PTZStateService
+from src.services.ptz_service import PTZStateService
 
 
 def test_flags_default_false():

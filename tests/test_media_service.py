@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from src.services.media_service import safe_join, safe_rel_path
+from src.routes.media import _safe_join as safe_join, _safe_rel_path as safe_rel_path
 
 
 def test_safe_rel_path_normalizes_and_strips():
