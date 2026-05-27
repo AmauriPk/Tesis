@@ -1,0 +1,10 @@
+Metrica,Criterio,Resultado,Requisito,Veredicto
+TSE (Seg. Efectivo),≥ 0.8,— PENDIENTE,RF-10,— PENDIENTE
+t_reacq promedio (s),≤ 3.0,— PENDIENTE,RNF-09,— PENDIENTE
+t_reacq máximo (s),—,— PENDIENTE,—,—
+t_reacq P95 (s),—,— PENDIENTE,—,—
+Jitter PTZ (°),≤ 2.0,— PENDIENTE,RNF-08,— PENDIENTE
+Pérdidas totales,—,— PENDIENTE,—,—
+Readquisiciones exitosas,—,— PENDIENTE,—,—
+Pérdidas sin recuperación,—,— PENDIENTE,—,—
+Tasa readquisición,—,— PENDIENTE,—,—

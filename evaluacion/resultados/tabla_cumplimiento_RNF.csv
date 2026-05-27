@@ -1,0 +1,11 @@
+ID,Descripcion,Criterio,Resultado,Veredicto
+RNF-01,Procesamiento en tiempo real,FPS ≥ 25 y Latencia ≤ 100 ms,rendimiento_live,✓ APROBADO
+RNF-02,Precisión del modelo de detección,"Precision ≥ 0.85, Recall ≥ 0.70, mAP50 ≥ 0.80",metricas_modelo,✓ APROBADO
+RNF-03,Tasa de falsos positivos aceptable,FP rate ≤ 5 %,analisis_falsos_positivos,— Pendiente de medición
+RNF-04,Robustez ante condiciones de iluminación,Recall ≥ 0.70 en todas las condiciones,comparativa_iluminacion,— Pendiente de medición
+RNF-05,Alta disponibilidad del sistema,Operación continua sin reinicio manual,—,— Verificación manual
+RNF-06,Tiempo de arranque rápido,Sistema listo en < 60 s desde inicio,—,— Verificación manual
+RNF-07,Compatibilidad con cámaras IP y PTZ estándar (ONVIF/RTSP),Conexión exitosa con cámara del proyecto,—,— Verificación manual
+RNF-08,Estabilidad del seguimiento PTZ (jitter),Jitter ≤ 2.0 °,metricas_ptz,— PENDIENTE
+RNF-09,Tiempo de readquisición PTZ,t_reacq promedio ≤ 3.0 s,metricas_ptz,— PENDIENTE
+RNF-10,Seguridad de acceso al panel,Autenticación requerida — acceso bloqueado sin login,—,— Verificación manual

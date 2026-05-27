@@ -1,0 +1,539 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Capítulo IV — Evaluación del Sistema SIRAN</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 13px; color: #1a1a1a; background: #f5f5f5;
+    padding: 20px;
+}
+.contenedor { max-width: 1100px; margin: auto; background: #fff;
+              padding: 40px; border: 1px solid #ddd; }
+h1 { font-size: 20px; color: #003366; border-bottom: 2px solid #003366;
+     padding-bottom: 10px; margin-bottom: 6px; }
+.subtitulo { font-size: 13px; color: #555; margin-bottom: 24px; }
+h2 { font-size: 16px; color: #003366; margin: 32px 0 12px;
+     border-left: 4px solid #0055a5; padding-left: 10px; }
+h3 { font-size: 14px; color: #0055a5; margin: 20px 0 8px; }
+.subseccion { margin-left: 16px; }
+nav { background: #003366; padding: 12px 16px; margin-bottom: 28px;
+      border-radius: 4px; }
+nav a { color: #cce0ff; text-decoration: none; margin-right: 16px;
+        font-size: 12px; }
+nav a:hover { color: #fff; text-decoration: underline; }
+table { width: 100%; border-collapse: collapse; margin: 10px 0 20px;
+        font-size: 12px; }
+thead tr { background: #003366; color: #fff; }
+th { padding: 7px 10px; text-align: left; font-weight: 600; }
+td { padding: 6px 10px; border-bottom: 1px solid #e0e0e0; }
+tbody tr:nth-child(even) { background: #f9f9f9; }
+tbody tr:hover { background: #eef3ff; }
+tr.cumple td { }
+tr.no-cumple td { }
+td.cumple    { color: #1a7a1a; font-weight: bold; }
+td.no-cumple { color: #b30000; font-weight: bold; }
+td.pendiente { color: #7a6000; }
+.sin-datos { color: #888; font-style: italic; padding: 10px 0; }
+.figuras-grid { display: flex; flex-wrap: wrap; gap: 16px; margin: 16px 0; }
+.figura-item { text-align: center; }
+.figura-item img { max-width: 340px; max-height: 260px; border: 1px solid #ccc;
+                   border-radius: 3px; }
+.figura-item p { font-size: 11px; color: #555; margin-top: 4px; }
+.resumen-badge { display: inline-block; padding: 4px 10px; border-radius: 12px;
+                 font-weight: bold; font-size: 12px; margin: 4px 4px 12px 0; }
+.badge-cumple    { background: #d4edda; color: #1a7a1a; border: 1px solid #a8d5b5; }
+.badge-nocumple  { background: #f8d7da; color: #b30000; border: 1px solid #f0a8af; }
+.badge-pendiente { background: #fff3cd; color: #7a6000; border: 1px solid #ffe08a; }
+footer { margin-top: 40px; font-size: 11px; color: #888;
+         border-top: 1px solid #ddd; padding-top: 10px; }
+@media print {
+    nav { display: none; }
+    body { background: #fff; padding: 0; }
+    .contenedor { border: none; padding: 10px; }
+}
+</style>
+</head>
+<body>
+<div class="contenedor">
+
+<h1>CAPÍTULO IV — Evaluación del Sistema SIRAN</h1>
+<p class="subtitulo">
+  Sistema de Identificación y Rastreo de Aeronaves No Tripuladas (SIRAN)<br>
+  Reporte generado: 2026-05-26 22:12:28
+</p>
+
+<nav><a href="#sec-41">4.1 Modelo</a><a href="#sec-411">4.1.1 Dataset</a><a href="#sec-412">4.1.2 Métricas</a><a href="#sec-413">4.1.3 Curvas</a><a href="#sec-42">4.2 Rendimiento</a><a href="#sec-43">4.3 Pruebas</a><a href="#sec-431">4.3.1 Distancia</a><a href="#sec-433">4.3.3 FP</a><a href="#sec-434">4.3.4 Iluminación</a><a href="#sec-435">4.3.5 PTZ</a><a href="#sec-44">4.4 Cumplimiento</a></nav>
+
+<!-- ======================================================================= -->
+
+<section id="sec-41">
+  <h2>4.1 Validación del Modelo de Detección</h2>
+  
+<div id="sec-411" class="subseccion">
+  <h3>4.1.1 Composición del dataset</h3>
+  <p>Distribución de imágenes por split del dataset de entrenamiento.</p><table>
+<thead><tr>
+<th>Split</th>
+<th>Positivas</th>
+<th>Negativas</th>
+<th>Total</th>
+<th>Proporcion_esperada</th>
+<th>Porcentaje_real</th>
+</tr></thead>
+<tbody>
+<tr class="">
+<td class="">train</td>
+<td class="">4443</td>
+<td class="">5207</td>
+<td class="">9650</td>
+<td class="">70%</td>
+<td class="">70.0%</td>
+</tr>
+<tr class="">
+<td class="">valid</td>
+<td class="">1269</td>
+<td class="">1486</td>
+<td class="">2755</td>
+<td class="">20%</td>
+<td class="">20.0%</td>
+</tr>
+<tr class="">
+<td class="">test</td>
+<td class="">636</td>
+<td class="">748</td>
+<td class="">1384</td>
+<td class="">10%</td>
+<td class="">10.0%</td>
+</tr>
+</tbody></table>
+</div>
+<div id="sec-412" class="subseccion">
+  <h3>4.1.2 Métricas del modelo (RNF-02)</h3>
+  <p>Resultados de la última época de entrenamiento vs. criterios de aceptación.</p><span class="resumen-badge badge-cumple">✓ 4 Cumple</span><span class="resumen-badge badge-pendiente">— 1 Pendiente</span><table>
+<thead><tr>
+<th>Metrica</th>
+<th>Criterio</th>
+<th>Resultado</th>
+<th>Veredicto</th>
+<th>Epoca</th>
+</tr></thead>
+<tbody>
+<tr class="cumple">
+<td class="">Precisión</td>
+<td class="">≥ 0.85</td>
+<td class="">0.9462</td>
+<td class="cumple">✓ CUMPLE</td>
+<td class="">30</td>
+</tr>
+<tr class="cumple">
+<td class="">Recall</td>
+<td class="">≥ 0.70</td>
+<td class="">0.9192</td>
+<td class="cumple">✓ CUMPLE</td>
+<td class="">30</td>
+</tr>
+<tr class="cumple">
+<td class="">mAP@0.5</td>
+<td class="">≥ 0.80</td>
+<td class="">0.9642</td>
+<td class="cumple">✓ CUMPLE</td>
+<td class="">30</td>
+</tr>
+<tr class="pendiente">
+<td class="">mAP@0.5:0.95</td>
+<td class="">—</td>
+<td class="">0.6798</td>
+<td class="pendiente">—</td>
+<td class="">30</td>
+</tr>
+<tr class="cumple">
+<td class="">GLOBAL RNF-02</td>
+<td class="">Todos ≥ umbral</td>
+<td class="">—</td>
+<td class="cumple">✓ APROBADO</td>
+<td class="">30</td>
+</tr>
+</tbody></table>
+</div>
+<div id="sec-413" class="subseccion">
+  <h3>4.1.3 Curvas de entrenamiento</h3>
+  <p>Figuras generadas por Ultralytics durante el entrenamiento.</p><div class="figuras-grid"><div class="figura-item"><img src="figuras_cap4/fig_4_1_curvas_perdida.png" alt="Fig 4 1 Curvas Perdida" /><p>Fig 4 1 Curvas Perdida</p></div>
+<div class="figura-item"><img src="figuras_cap4/fig_4_1_matriz_confusion.png" alt="Fig 4 1 Matriz Confusion" /><p>Fig 4 1 Matriz Confusion</p></div>
+<div class="figura-item"><img src="figuras_cap4/fig_4_1_matriz_confusion_norm.png" alt="Fig 4 1 Matriz Confusion Norm" /><p>Fig 4 1 Matriz Confusion Norm</p></div>
+<div class="figura-item"><img src="figuras_cap4/fig_4_1_predicciones_val.jpg" alt="Fig 4 1 Predicciones Val" /><p>Fig 4 1 Predicciones Val</p></div>
+</div>
+</div>
+</section>
+
+<!-- ======================================================================= -->
+
+<section id="sec-42">
+  <h2>4.2 Rendimiento del Sistema en Tiempo Real</h2>
+  
+<div id="sec-421" class="subseccion">
+  <h3>4.2.1 FPS y latencia de inferencia (RNF-01)</h3>
+  <p>Métricas de rendimiento medidas sobre inference_frames de la base de datos.</p><span class="resumen-badge badge-cumple">✓ 3 Cumple</span><span class="resumen-badge badge-pendiente">— 6 Pendiente</span><table>
+<thead><tr>
+<th>Metrica</th>
+<th>Valor</th>
+<th>Unidad</th>
+<th>Criterio</th>
+<th>Veredicto</th>
+</tr></thead>
+<tbody>
+<tr class="cumple">
+<td class="">FPS promedio</td>
+<td class="">52.50</td>
+<td class="">FPS</td>
+<td class="">≥ 25</td>
+<td class="cumple">✓ CUMPLE</td>
+</tr>
+<tr class="pendiente">
+<td class="">FPS mínimo</td>
+<td class="">0.00</td>
+<td class="">FPS</td>
+<td class="">—</td>
+<td class="pendiente">—</td>
+</tr>
+<tr class="pendiente">
+<td class="">FPS máximo</td>
+<td class="">124.73</td>
+<td class="">FPS</td>
+<td class="">—</td>
+<td class="pendiente">—</td>
+</tr>
+<tr class="cumple">
+<td class="">Latencia promedio</td>
+<td class="">25.34</td>
+<td class="">ms</td>
+<td class="">≤ 100</td>
+<td class="cumple">✓ CUMPLE</td>
+</tr>
+<tr class="pendiente">
+<td class="">Latencia máxima</td>
+<td class="">10165979.21</td>
+<td class="">ms</td>
+<td class="">—</td>
+<td class="pendiente">—</td>
+</tr>
+<tr class="pendiente">
+<td class="">Latencia P95</td>
+<td class="">27.94</td>
+<td class="">ms</td>
+<td class="">—</td>
+<td class="pendiente">—</td>
+</tr>
+<tr class="pendiente">
+<td class="">Frames analizados</td>
+<td class="">1,985,047</td>
+<td class="">frames</td>
+<td class="">—</td>
+<td class="pendiente">—</td>
+</tr>
+<tr class="pendiente">
+<td class="">Tasa de detección</td>
+<td class="">0.70</td>
+<td class="">%</td>
+<td class="">—</td>
+<td class="pendiente">—</td>
+</tr>
+<tr class="cumple">
+<td class="">GLOBAL RNF-01</td>
+<td class="">—</td>
+<td class="">—</td>
+<td class="">FPS≥25 Y Lat≤100ms</td>
+<td class="cumple">✓ APROBADO</td>
+</tr>
+</tbody></table>
+</div>
+</section>
+
+<!-- ======================================================================= -->
+
+<section id="sec-43">
+  <h2>4.3 Pruebas Experimentales en Campo</h2>
+  
+<div id="sec-431" class="subseccion">
+  <h3>4.3.1 Desempeño por distancia de detección (RF-03)</h3>
+  <p>Confianza, tasa de detección y FPS agrupados por distancia de vuelo.</p><span class="resumen-badge badge-pendiente">Sin datos</span><p class='sin-datos'>Sin datos — ejecuta el script correspondiente.</p>
+</div>
+<div id="sec-433" class="subseccion">
+  <h3>4.3.3 Tasa de falsos positivos con distractores (RNF-03)</h3>
+  <p>Análisis de alertas falsas generadas ante objetos que no son UAV.</p><span class="resumen-badge badge-pendiente">Sin datos</span><p class='sin-datos'>Sin datos — ejecuta el script correspondiente.</p>
+</div>
+<div id="sec-434" class="subseccion">
+  <h3>4.3.4 Comparativa por condición de iluminación (RNF-04)</h3>
+  <p>Recall y confianza bajo distintas condiciones lumínicas.</p><span class="resumen-badge badge-pendiente">Sin datos</span><p class='sin-datos'>Sin datos — ejecuta el script correspondiente.</p>
+</div>
+<div id="sec-435" class="subseccion">
+  <h3>4.3.5 Métricas del seguimiento PTZ (RF-10, RNF-08, RNF-09)</h3>
+  <p>TSE, tiempos de readquisición y jitter del sistema pan-tilt-zoom.</p><span class="resumen-badge badge-pendiente">— 9 Pendiente</span><table>
+<thead><tr>
+<th>Metrica</th>
+<th>Criterio</th>
+<th>Resultado</th>
+<th>Requisito</th>
+<th>Veredicto</th>
+</tr></thead>
+<tbody>
+<tr class="pendiente">
+<td class="">TSE (Seg. Efectivo)</td>
+<td class="">≥ 0.8</td>
+<td class="">— PENDIENTE</td>
+<td class="">RF-10</td>
+<td class="pendiente">— PENDIENTE</td>
+</tr>
+<tr class="pendiente">
+<td class="">t_reacq promedio (s)</td>
+<td class="">≤ 3.0</td>
+<td class="">— PENDIENTE</td>
+<td class="">RNF-09</td>
+<td class="pendiente">— PENDIENTE</td>
+</tr>
+<tr class="pendiente">
+<td class="">t_reacq máximo (s)</td>
+<td class="">—</td>
+<td class="">— PENDIENTE</td>
+<td class="">—</td>
+<td class="pendiente">—</td>
+</tr>
+<tr class="pendiente">
+<td class="">t_reacq P95 (s)</td>
+<td class="">—</td>
+<td class="">— PENDIENTE</td>
+<td class="">—</td>
+<td class="pendiente">—</td>
+</tr>
+<tr class="pendiente">
+<td class="">Jitter PTZ (°)</td>
+<td class="">≤ 2.0</td>
+<td class="">— PENDIENTE</td>
+<td class="">RNF-08</td>
+<td class="pendiente">— PENDIENTE</td>
+</tr>
+<tr class="pendiente">
+<td class="">Pérdidas totales</td>
+<td class="">—</td>
+<td class="">— PENDIENTE</td>
+<td class="">—</td>
+<td class="pendiente">—</td>
+</tr>
+<tr class="pendiente">
+<td class="">Readquisiciones exitosas</td>
+<td class="">—</td>
+<td class="">— PENDIENTE</td>
+<td class="">—</td>
+<td class="pendiente">—</td>
+</tr>
+<tr class="pendiente">
+<td class="">Pérdidas sin recuperación</td>
+<td class="">—</td>
+<td class="">— PENDIENTE</td>
+<td class="">—</td>
+<td class="pendiente">—</td>
+</tr>
+<tr class="pendiente">
+<td class="">Tasa readquisición</td>
+<td class="">—</td>
+<td class="">— PENDIENTE</td>
+<td class="">—</td>
+<td class="pendiente">—</td>
+</tr>
+</tbody></table>
+</div>
+</section>
+
+<!-- ======================================================================= -->
+
+<section id="sec-44">
+  <h2>4.4 Análisis de Cumplimiento de Requerimientos</h2>
+  
+<div id="sec-441" class="subseccion">
+  <h3>4.4.1 Requisitos Funcionales (RF-01 a RF-11)</h3>
+  <span class="resumen-badge badge-cumple">✓ 1 Cumple</span><span class="resumen-badge badge-pendiente">— 10 Pendiente</span><table>
+<thead><tr>
+<th>ID</th>
+<th>Descripcion</th>
+<th>Criterio</th>
+<th>Resultado</th>
+<th>Veredicto</th>
+</tr></thead>
+<tbody>
+<tr class="cumple">
+<td class="">RF-01</td>
+<td class="">Detección de UAV en tiempo real</td>
+<td class="">FPS ≥ 25 y Latencia ≤ 100 ms</td>
+<td class="">rendimiento_live</td>
+<td class="cumple">✓ APROBADO</td>
+</tr>
+<tr class="pendiente">
+<td class="">RF-02</td>
+<td class="">Confirmación de alerta (umbral de confianza)</td>
+<td class="">Confianza promedio ≥ 0.60</td>
+<td class="">resultados_por_distancia</td>
+<td class="pendiente">— Pendiente de medición</td>
+</tr>
+<tr class="pendiente">
+<td class="">RF-03</td>
+<td class="">Detección a distintas distancias (10–100 m)</td>
+<td class="">Conf. promedio ≥ 0.60 en todas las distancias</td>
+<td class="">resultados_por_distancia</td>
+<td class="pendiente">— Pendiente de medición</td>
+</tr>
+<tr class="pendiente">
+<td class="">RF-04</td>
+<td class="">Operación en distintas condiciones de iluminación</td>
+<td class="">Recall ≥ 0.70 en todas las condiciones</td>
+<td class="">comparativa_iluminacion</td>
+<td class="pendiente">— Pendiente de medición</td>
+</tr>
+<tr class="pendiente">
+<td class="">RF-05</td>
+<td class="">Generación de alerta visual/sonora al detectar UAV</td>
+<td class="">Funcionalidad verificada manualmente</td>
+<td class="">—</td>
+<td class="pendiente">— Verificación manual</td>
+</tr>
+<tr class="pendiente">
+<td class="">RF-06</td>
+<td class="">Registro de eventos de detección en base de datos</td>
+<td class="">detection_events se puebla durante operación</td>
+<td class="">—</td>
+<td class="pendiente">— Verificación manual</td>
+</tr>
+<tr class="pendiente">
+<td class="">RF-07</td>
+<td class="">Visualización de video en tiempo real</td>
+<td class="">Stream MJPEG accesible en navegador</td>
+<td class="">—</td>
+<td class="pendiente">— Verificación manual</td>
+</tr>
+<tr class="pendiente">
+<td class="">RF-08</td>
+<td class="">Panel de administración y configuración</td>
+<td class="">Acceso autenticado y funcional</td>
+<td class="">—</td>
+<td class="pendiente">— Verificación manual</td>
+</tr>
+<tr class="pendiente">
+<td class="">RF-09</td>
+<td class="">Exportación de datos e historial de detecciones</td>
+<td class="">Descarga CSV/JSON disponible en la interfaz</td>
+<td class="">—</td>
+<td class="pendiente">— Verificación manual</td>
+</tr>
+<tr class="pendiente">
+<td class="">RF-10</td>
+<td class="">Seguimiento automático PTZ (pan-tilt-zoom)</td>
+<td class="">TSE ≥ 0.80</td>
+<td class="">metricas_ptz</td>
+<td class="pendiente">— PENDIENTE</td>
+</tr>
+<tr class="pendiente">
+<td class="">RF-11</td>
+<td class="">Control manual de cámara PTZ</td>
+<td class="">Movimiento responde a comandos del operador</td>
+<td class="">—</td>
+<td class="pendiente">— Verificación manual</td>
+</tr>
+</tbody></table>
+</div>
+<div id="sec-442" class="subseccion">
+  <h3>4.4.2 Requisitos No Funcionales (RNF-01 a RNF-10)</h3>
+  <span class="resumen-badge badge-cumple">✓ 2 Cumple</span><span class="resumen-badge badge-pendiente">— 8 Pendiente</span><table>
+<thead><tr>
+<th>ID</th>
+<th>Descripcion</th>
+<th>Criterio</th>
+<th>Resultado</th>
+<th>Veredicto</th>
+</tr></thead>
+<tbody>
+<tr class="cumple">
+<td class="">RNF-01</td>
+<td class="">Procesamiento en tiempo real</td>
+<td class="">FPS ≥ 25 y Latencia ≤ 100 ms</td>
+<td class="">rendimiento_live</td>
+<td class="cumple">✓ APROBADO</td>
+</tr>
+<tr class="cumple">
+<td class="">RNF-02</td>
+<td class="">Precisión del modelo de detección</td>
+<td class="">Precision ≥ 0.85, Recall ≥ 0.70, mAP50 ≥ 0.80</td>
+<td class="">metricas_modelo</td>
+<td class="cumple">✓ APROBADO</td>
+</tr>
+<tr class="pendiente">
+<td class="">RNF-03</td>
+<td class="">Tasa de falsos positivos aceptable</td>
+<td class="">FP rate ≤ 5 %</td>
+<td class="">analisis_falsos_positivos</td>
+<td class="pendiente">— Pendiente de medición</td>
+</tr>
+<tr class="pendiente">
+<td class="">RNF-04</td>
+<td class="">Robustez ante condiciones de iluminación</td>
+<td class="">Recall ≥ 0.70 en todas las condiciones</td>
+<td class="">comparativa_iluminacion</td>
+<td class="pendiente">— Pendiente de medición</td>
+</tr>
+<tr class="pendiente">
+<td class="">RNF-05</td>
+<td class="">Alta disponibilidad del sistema</td>
+<td class="">Operación continua sin reinicio manual</td>
+<td class="">—</td>
+<td class="pendiente">— Verificación manual</td>
+</tr>
+<tr class="pendiente">
+<td class="">RNF-06</td>
+<td class="">Tiempo de arranque rápido</td>
+<td class="">Sistema listo en < 60 s desde inicio</td>
+<td class="">—</td>
+<td class="pendiente">— Verificación manual</td>
+</tr>
+<tr class="pendiente">
+<td class="">RNF-07</td>
+<td class="">Compatibilidad con cámaras IP y PTZ estándar (ONVIF/RTSP)</td>
+<td class="">Conexión exitosa con cámara del proyecto</td>
+<td class="">—</td>
+<td class="pendiente">— Verificación manual</td>
+</tr>
+<tr class="pendiente">
+<td class="">RNF-08</td>
+<td class="">Estabilidad del seguimiento PTZ (jitter)</td>
+<td class="">Jitter ≤ 2.0 °</td>
+<td class="">metricas_ptz</td>
+<td class="pendiente">— PENDIENTE</td>
+</tr>
+<tr class="pendiente">
+<td class="">RNF-09</td>
+<td class="">Tiempo de readquisición PTZ</td>
+<td class="">t_reacq promedio ≤ 3.0 s</td>
+<td class="">metricas_ptz</td>
+<td class="pendiente">— PENDIENTE</td>
+</tr>
+<tr class="pendiente">
+<td class="">RNF-10</td>
+<td class="">Seguridad de acceso al panel</td>
+<td class="">Autenticación requerida — acceso bloqueado sin login</td>
+<td class="">—</td>
+<td class="pendiente">— Verificación manual</td>
+</tr>
+</tbody></table>
+</div>
+</section>
+
+<footer>
+  Reporte generado automáticamente por eval_11_reporte_final.py — EVAL-SUITE SIRAN &nbsp;|&nbsp;
+  Fecha: 2026-05-26 22:12:28 &nbsp;|&nbsp;
+  Para copiar tablas a Word: abre este archivo en Chrome/Edge → selecciona la tabla → Ctrl+C → pegar en Word.
+</footer>
+
+</div>
+</body>
+</html>

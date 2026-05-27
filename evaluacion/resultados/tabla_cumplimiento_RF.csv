@@ -1,0 +1,12 @@
+ID,Descripcion,Criterio,Resultado,Veredicto
+RF-01,Detección de UAV en tiempo real,FPS ≥ 25 y Latencia ≤ 100 ms,rendimiento_live,✓ APROBADO
+RF-02,Confirmación de alerta (umbral de confianza),Confianza promedio ≥ 0.60,resultados_por_distancia,— Pendiente de medición
+RF-03,Detección a distintas distancias (10–100 m),Conf. promedio ≥ 0.60 en todas las distancias,resultados_por_distancia,— Pendiente de medición
+RF-04,Operación en distintas condiciones de iluminación,Recall ≥ 0.70 en todas las condiciones,comparativa_iluminacion,— Pendiente de medición
+RF-05,Generación de alerta visual/sonora al detectar UAV,Funcionalidad verificada manualmente,—,— Verificación manual
+RF-06,Registro de eventos de detección en base de datos,detection_events se puebla durante operación,—,— Verificación manual
+RF-07,Visualización de video en tiempo real,Stream MJPEG accesible en navegador,—,— Verificación manual
+RF-08,Panel de administración y configuración,Acceso autenticado y funcional,—,— Verificación manual
+RF-09,Exportación de datos e historial de detecciones,Descarga CSV/JSON disponible en la interfaz,—,— Verificación manual
+RF-10,Seguimiento automático PTZ (pan-tilt-zoom),TSE ≥ 0.80,metricas_ptz,— PENDIENTE
+RF-11,Control manual de cámara PTZ,Movimiento responde a comandos del operador,—,— Verificación manual

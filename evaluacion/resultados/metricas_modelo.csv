@@ -1,0 +1,6 @@
+Metrica,Criterio,Resultado,Veredicto,Epoca
+Precisión,≥ 0.85,0.9462,✓ CUMPLE,30
+Recall,≥ 0.70,0.9192,✓ CUMPLE,30
+mAP@0.5,≥ 0.80,0.9642,✓ CUMPLE,30
+mAP@0.5:0.95,—,0.6798,—,30
+GLOBAL RNF-02,Todos ≥ umbral,—,✓ APROBADO,30

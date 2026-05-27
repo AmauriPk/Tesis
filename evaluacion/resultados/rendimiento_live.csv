@@ -1,0 +1,10 @@
+Metrica,Valor,Unidad,Criterio,Veredicto
+FPS promedio,52.50,FPS,≥ 25,✓ CUMPLE
+FPS mínimo,0.00,FPS,—,—
+FPS máximo,124.73,FPS,—,—
+Latencia promedio,25.34,ms,≤ 100,✓ CUMPLE
+Latencia máxima,10165979.21,ms,—,—
+Latencia P95,27.94,ms,—,—
+Frames analizados,"1,985,047",frames,—,—
+Tasa de detección,0.70,%,—,—
+GLOBAL RNF-01,—,—,FPS≥25 Y Lat≤100ms,✓ APROBADO

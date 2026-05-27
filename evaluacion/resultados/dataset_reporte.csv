@@ -1,0 +1,4 @@
+Split,Positivas,Negativas,Total,Proporcion_esperada,Porcentaje_real
+train,4443,5207,9650,70%,70.0%
+valid,1269,1486,2755,20%,20.0%
+test,636,748,1384,10%,10.0%
