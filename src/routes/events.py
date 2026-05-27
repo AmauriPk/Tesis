@@ -1,3 +1,20 @@
+"""
+Módulo      : src/routes/events.py
+Rol         : Blueprint de eventos de detección y alertas:
+              ``/api/recent_alerts`` (últimas filas de detections_v2),
+              ``/api/recent_detection_events`` (eventos agrupados de detection_events),
+              ``/api/export_detection_events.csv`` (exportación para tesis),
+              ``/api/detection_summary`` (estadísticas agregadas),
+              ``/api/admin/cleanup_test_data`` (purga segura admin).
+              Todas las rutas son fail-safe: ante DB inexistente/bloqueada devuelven
+              lista vacía con status 200 para no romper la UI del operador.
+Conectado con: src/system_core.py (_open_db),
+              src/services/detection_event_service.py
+              (_ensure_detection_events_schema, _parse_iso_ts_to_epoch — inyectados).
+Usado por   : app.py (registra events_bp; init_events_routes(**deps)).
+Hilos       : Ninguno propio — lee DB de solo lectura en el hilo del request.
+Base de datos: detections.db (WAL, lectura directa de detections_v2 y detection_events).
+"""
 from __future__ import annotations
 
 import logging

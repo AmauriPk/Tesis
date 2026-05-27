@@ -1,7 +1,15 @@
 """
-Tracker SORT simplificado — asignación de IDs entre frames via IoU + Hungarian.
-Sin Kalman filter — matching directo entre detecciones consecutivas.
-Cumple RO-06 (track_id por objeto) a nivel de pipeline de detección.
+Módulo      : tracker_service.py
+Rol         : Tracker multi-objeto SORT simplificado. Asigna IDs persistentes a
+              detecciones entre frames consecutivos usando IoU + asignación húngara
+              (linear_sum_assignment de scipy). Sin Kalman filter — matching directo.
+Conectado con: src/system_core.py (iou_matrix), scipy.optimize, numpy.
+Usado por   : src/video_processor.py (LiveVideoProcessor instancia SORTTracker
+              y llama update() en cada frame de inferencia).
+Hilos       : El tracker corre dentro del hilo LiveVideoProcessor._run() —
+              no es thread-safe (no necesario: acceso desde un único hilo).
+Base de datos: No accede a DB; los track_ids se propagan en los dicts de
+              detección que MetricsDBWriter persiste en detections_v2.
 """
 from __future__ import annotations
 
@@ -17,7 +25,16 @@ logger = logging.getLogger(__name__)
 
 
 class Track:
-    """Objeto rastreado con ID único y estado de vida."""
+    """
+    Objeto rastreado individual con ID único y estado de vida (hits/misses).
+
+    Responsabilidad: mantener el bounding box actualizado y decidir cuándo
+                     un track debe eliminarse (cuando misses > max_misses).
+    Ciclo de vida  : creado por SORTTracker al detectar un objeto nuevo;
+                     destruido cuando ``misses > max_misses``.
+    Atributos clave: ``track_id`` (entero incremental global), ``hits`` (matches
+                     acumulados), ``misses`` (frames consecutivos sin match).
+    """
 
     _next_id = 1
 
@@ -43,11 +60,18 @@ class Track:
 
 class SORTTracker:
     """
-    Tracker SORT simplificado.
+    Tracker SORT simplificado — múltiples objetos, IDs persistentes por IoU.
 
-    iou_threshold — IoU mínimo para considerar match (default 0.30)
-    max_misses    — frames sin match antes de eliminar track (default 3)
-    min_hits      — hits mínimos para que un track sea confirmado (default 1)
+    Responsabilidad: asignar ``track_id`` a las detecciones de cada frame
+                     de forma consistente entre frames consecutivos.
+    Ciclo de vida  : instanciado en LiveVideoProcessor.__init__(); reset() se
+                     llama automáticamente al reconectar el RTSP para evitar
+                     IDs obsoletos de la sesión anterior.
+
+    Atributos:
+        iou_threshold: IoU mínimo para considerar un match (RO-06: default 0.30).
+        max_misses: Frames sin match antes de eliminar un track (default 3).
+        min_hits: Hits mínimos para confirmar un track nuevo (default 1).
     """
 
     def __init__(

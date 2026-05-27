@@ -1,3 +1,20 @@
+"""
+Módulo      : detection_event_service.py
+Rol         : Agrupa frames confirmados en "eventos de detección" persistidos
+              en la tabla ``detection_events`` de detections.db.
+              Un evento abarca detecciones consecutivas separadas por menos de
+              ``gap_seconds`` (default 3 s); al superar ese intervalo o al detener
+              el worker, el evento se cierra con sus métricas finales.
+              Al arrancar, si la tabla está vacía, realiza un backfill ligero
+              reconstruyendo eventos a partir de ``detections_v2``.
+Conectado con: src/system_core.py (FrameRecord, _open_db),
+              config.py (_env_int para EVENT_BACKFILL_LIMIT).
+Usado por   : app.py (instancia DetectionEventWriter, lo llama desde
+              metrics_enqueue en cada FrameRecord confirmado).
+Hilos       : _thread (daemon) consume la cola; el hilo de video solo llama
+              ``enqueue()`` que es thread-safe (Queue.put_nowait).
+Base de datos: detections.db — tabla detection_events (SQLite WAL, _open_db).
+"""
 from __future__ import annotations
 
 import logging
@@ -15,6 +32,15 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_iso_ts_to_epoch(ts_iso: str | None) -> float | None:
+    """
+    Convierte un timestamp ISO 8601 a epoch float para comparar intervalos.
+
+    Args:
+        ts_iso: Cadena ISO, p.ej. ``"2024-06-01T15:30:00.123456"``. Puede ser None.
+
+    Returns:
+        epoch float si la conversión tiene éxito; None en caso contrario.
+    """
     if not ts_iso:
         return None
     try:
@@ -24,6 +50,14 @@ def _parse_iso_ts_to_epoch(ts_iso: str | None) -> float | None:
 
 
 def _ensure_detection_events_schema(con: sqlite3.Connection) -> None:
+    """
+    Crea la tabla ``detection_events`` si no existe (idempotente).
+
+    Diseño de columnas:
+    - started_at / ended_at : ISO 8601, ended_at es NULL mientras el evento está abierto.
+    - status                : ``"open"`` durante la acumulación, ``"closed"`` al cerrar.
+    - best_evidence_path    : ruta relativa a la imagen con mayor confianza del evento.
+    """
     con.execute("PRAGMA foreign_keys=ON;")
     con.execute(
         """
@@ -47,9 +81,18 @@ def _ensure_detection_events_schema(con: sqlite3.Connection) -> None:
 
 class DetectionEventWriter:
     """
-    Agrupa detecciones confirmadas en eventos (para UI defendible y eficiente).
+    Agrupa detecciones confirmadas en eventos de detección persistidos en detections.db.
 
-    Importante: NO corre dentro del hilo de video/inferencia. Consume una cola.
+    Responsabilidad: consumir FrameRecords de una cola y acumularlos en filas de
+                     ``detection_events``, cerrando un evento cuando el intervalo
+                     entre frames supera ``gap_seconds`` o cuando el worker se detiene.
+    Ciclo de vida  : instanciado en app.py al arranque; hilo daemon inicia al construir
+                     si ``enabled=True``. No se recrea en caliente.
+    Atributos clave: ``gap_seconds`` (intervalo máximo entre frames del mismo evento),
+                     ``_active_event_id`` (None si no hay evento abierto),
+                     ``_active_max_conf`` (confianza máxima acumulada).
+    Importante     : NO corre dentro del hilo de video/inferencia — consume una cola
+                     thread-safe para no bloquear el pipeline de detección.
     """
 
     def __init__(self, db_path: str, *, enabled: bool = True, gap_seconds: float = 3.0) -> None:
@@ -78,6 +121,15 @@ class DetectionEventWriter:
             self._thread.start()
 
     def enqueue(self, record: FrameRecord) -> None:
+        """
+        Encola un FrameRecord para procesamiento asíncrono (non-blocking).
+
+        Solo encola si ``enabled=True``. Si la cola está llena, descarta el frame
+        silenciosamente — es preferible perder un evento a bloquear el hilo de video.
+
+        Args:
+            record: Frame procesado por LiveVideoProcessor con ``confirmed=True`` o False.
+        """
         if not self.enabled:
             return
         try:
@@ -87,6 +139,11 @@ class DetectionEventWriter:
             pass
 
     def stop(self, timeout_s: float = 2.0) -> None:
+        """
+        Señala al hilo que debe terminar y espera hasta ``timeout_s``.
+
+        Antes de salir, el hilo cierra el evento activo si lo hay.
+        """
         if not self.enabled:
             return
         self._stop.set()
@@ -96,12 +153,19 @@ class DetectionEventWriter:
             pass
 
     def _connect(self) -> sqlite3.Connection:
+        """Abre la DB en modo WAL y garantiza el esquema de detection_events."""
         con = _open_db(self.db_path)
         con.row_factory = sqlite3.Row
         _ensure_detection_events_schema(con)
         return con
 
     def _close_active_event(self, con: sqlite3.Connection) -> None:
+        """
+        Cierra el evento activo marcándolo como ``status='closed'`` en DB y resetea estado.
+
+        Siempre restablece ``_active_event_id = None`` en el bloque finally para que
+        el próximo frame con detección cree un nuevo evento limpio.
+        """
         if self._active_event_id is None:
             return
         try:
@@ -138,6 +202,13 @@ class DetectionEventWriter:
             self._active_best_evidence_path = None
 
     def _create_active_event(self, con: sqlite3.Connection, *, started_at_iso: str, source: str | None) -> None:
+        """
+        Inserta una nueva fila en detection_events con ``status='open'`` y almacena el ID.
+
+        Args:
+            started_at_iso: Timestamp ISO del primer frame confirmado del evento.
+            source: Fuente del FrameRecord (p.ej. ``"rtsp"``); puede ser None.
+        """
         now_iso = datetime.now().isoformat()
         try:
             cur = con.cursor()
@@ -164,6 +235,12 @@ class DetectionEventWriter:
             self._active_event_id = None
 
     def _update_active_event(self, con: sqlite3.Connection) -> None:
+        """
+        Actualiza el evento abierto con las métricas acumuladas hasta el frame actual.
+
+        El log se throttlea a una entrada cada 2 s para evitar spam en la consola
+        cuando hay streams continuos de alta frecuencia.
+        """
         if self._active_event_id is None:
             return
         try:
@@ -195,6 +272,17 @@ class DetectionEventWriter:
             logger.error("event update_failed id=%s err=%s", self._active_event_id, e)
 
     def _run(self) -> None:
+        """
+        Loop principal del worker de eventos.
+
+        Flujo por frame recibido:
+        1. Descarta frames no confirmados (``confirmed=False``).
+        2. Si el intervalo desde ``_active_last_epoch`` supera ``gap_seconds``, cierra evento.
+        3. Si no hay evento activo, crea uno nuevo en DB.
+        4. Acumula métricas (count, max_conf, best_bbox, evidencia) y actualiza DB.
+        5. En timeout de cola (0.25 s sin items): comprueba si el evento activo expiró.
+        Al terminar (``_stop`` set o excepción fatal): cierra evento activo y la conexión.
+        """
         con: sqlite3.Connection | None = None
         try:
             con = self._connect()
@@ -308,7 +396,15 @@ class DetectionEventWriter:
 
     def _backfill_from_detections(self, con: sqlite3.Connection) -> None:
         """
-        Construye eventos a partir de detections_v2 existentes (solo una vez si la tabla está vacía).
+        Reconstruye eventos de detección a partir de ``detections_v2`` (migración one-shot).
+
+        Se ejecuta solo si ``detection_events`` está vacía al arrancar el worker.
+        Agrupa filas de ``detections_v2`` con ``confirmed=1`` respetando el mismo
+        criterio de ``gap_seconds``, limitado a ``EVENT_BACKFILL_LIMIT`` filas
+        (default 2000, env configurable).
+
+        Args:
+            con: Conexión SQLite activa (ya tiene el esquema garantizado).
         """
         gap_s = float(self.gap_seconds)
         try:

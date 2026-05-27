@@ -1,3 +1,16 @@
+"""
+Módulo      : src/routes/auth.py
+Rol         : Blueprint de autenticación (login/logout) con rate-limiting
+              in-memory por IP+usuario para mitigar fuerza bruta (RNF-05).
+              El rate limiter no es persistente — se resetea al reiniciar el proceso.
+Conectado con: config.py (SECURITY_CONFIG: login_max_attempts, lockout_s, window_s),
+              src/system_core.py (User — SQLAlchemy model),
+              flask_login (login_user, logout_user).
+Usado por   : app.py (registra auth_bp; init_auth_routes(**deps) inyecta User y configs).
+Hilos       : _login_attempts_lock (threading.Lock) protege el dict in-memory
+              contra concurrencia entre requests simultáneos.
+Base de datos: app.db (SQLAlchemy — consulta User.query.filter_by).
+"""
 from __future__ import annotations
 
 import os
@@ -25,6 +38,11 @@ def _get_dep(key: str): return get_dep(_deps, key)
 
 
 def _client_ip() -> str:
+    """
+    Devuelve la IP del cliente respetando X-Forwarded-For (proxy reverso).
+
+    Toma el primer segmento de XFF para evitar spoofing con IPs adicionales.
+    """
     xff = (request.headers.get("X-Forwarded-For") or "").strip()
     if xff:
         return xff.split(",")[0].strip() or "unknown"
@@ -32,11 +50,23 @@ def _client_ip() -> str:
 
 
 def _attempt_key(username: str) -> str:
+    """
+    Construye la clave del rate-limiter: ``"IP:username_normalizado"``.
+
+    Combinar IP + username evita que un atacante use múltiples usernames
+    para eludir el límite por IP sola, y viceversa.
+    """
     u = (username or "").strip().lower() or "__empty__"
     return f"{_client_ip()}:{u}"
 
 
 def _prune_attempts(now: float, *, window_s: int) -> None:
+    """
+    Elimina intentos y claves expiradas del dict in-memory.
+
+    Debe llamarse bajo ``_login_attempts_lock``. Previene crecimiento
+    indefinido del dict en servidores de larga vida.
+    """
     # Limpia intentos viejos para evitar crecimiento indefinido.
     cutoff = float(now) - float(window_s)
     keys_to_delete: list[str] = []
@@ -54,6 +84,11 @@ def _prune_attempts(now: float, *, window_s: int) -> None:
 
 
 def _is_locked(key: str, now: float, *, window_s: int) -> bool:
+    """
+    Devuelve True si la clave está en período de bloqueo activo.
+
+    Llama a _prune_attempts internamente para mantener el dict limpio.
+    """
     with _login_attempts_lock:
         _prune_attempts(now, window_s=window_s)
         rec = _login_attempts.get(key) or {}
@@ -69,6 +104,11 @@ def _record_failed_attempt(
     window_s: int,
     lockout_s: int,
 ) -> None:
+    """
+    Registra un intento fallido y activa bloqueo si se supera ``max_attempts``.
+
+    El bloqueo dura ``lockout_s`` segundos a partir del último intento fallido.
+    """
     with _login_attempts_lock:
         _prune_attempts(now, window_s=window_s)
         rec = _login_attempts.get(key)
@@ -83,6 +123,7 @@ def _record_failed_attempt(
 
 
 def _clear_attempts(key: str) -> None:
+    """Borra el registro de intentos de una clave tras un login exitoso."""
     with _login_attempts_lock:
         _login_attempts.pop(key, None)
 

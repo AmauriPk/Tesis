@@ -1,3 +1,17 @@
+"""
+Módulo      : src/routes/dashboard.py
+Rol         : Blueprint del Dashboard del Operador:
+              stream MJPEG en vivo, métricas en tiempo real (SSE/polling),
+              métricas históricas (últimas 100 inferencias de inference_frames),
+              estado de la cámara y redirección index → rol.
+Conectado con: config.py (STORAGE_CONFIG — db_path),
+              src/system_core.py (_open_db, iou_pair),
+              src/video_processor.py (LiveVideoProcessor — mjpeg_generator, get_metrics),
+              src/services/ptz_service.py (PTZCapabilityService.get_camera_source_mode).
+Usado por   : app.py (registra dashboard_bp; init_dashboard_routes(**deps)).
+Hilos       : Ninguno propio — delega en LiveVideoProcessor y RTSPLatestFrameReader.
+Base de datos: detections.db (consulta directa a inference_frames para historical_metrics).
+"""
 from __future__ import annotations
 
 import sqlite3

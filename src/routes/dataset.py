@@ -1,3 +1,15 @@
+"""
+Módulo      : src/routes/dataset.py
+Rol         : Blueprint de administración del dataset de mejora continua.
+              Permite listar imágenes limpias (recoleccion/**/limpias/), clasificarlas
+              (mover a negative/ o positive_pending/), revertir clasificaciones y
+              descargarlas de forma segura (safe_join).
+Conectado con: src/routes/media.py (_safe_join — inyectado como dep "safe_join"),
+              Flask (send_file, abort, url_for).
+Usado por   : app.py (registra dataset_bp; init_dataset_routes(**deps)).
+Hilos       : Ninguno — operaciones de I/O síncronas en el hilo del request.
+Base de datos: No accede a ninguna DB directamente (manipula archivos en disco).
+"""
 from __future__ import annotations
 
 import logging

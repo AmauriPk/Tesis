@@ -1,4 +1,14 @@
-"""Servicios de arranque — logging, clave secreta y usuarios por defecto."""
+"""
+Módulo      : bootstrap_service.py
+Rol         : Inicialización del sistema en el arranque: configura logging,
+              genera/carga la Flask SECRET_KEY y crea usuarios por defecto.
+              Se invoca ANTES de que Flask y config.py estén disponibles.
+Conectado con: src/system_core.py (User, db — importación tardía para evitar
+              circularidad), logging.handlers (RotatingFileHandler), secrets.
+Usado por   : app.py (las tres funciones se llaman al inicio del módulo).
+Hilos       : Ninguno — ejecución síncrona en el proceso principal de arranque.
+Base de datos: app.db (SQLAlchemy vía User.query) — solo en bootstrap_users().
+"""
 from __future__ import annotations
 
 import logging
@@ -37,7 +47,19 @@ def setup_logging() -> None:
 
 
 def load_or_create_secret_key(key_file: str) -> str:
-    """Carga o genera la Flask SECRET_KEY y la persiste en `key_file`."""
+    """
+    Carga la Flask SECRET_KEY desde disco o genera una nueva si no existe.
+
+    Persiste la clave en `key_file` para que sobreviva reinicios del servidor
+    y no invalide las cookies de sesión activas de los operadores.
+
+    Args:
+        key_file: Ruta del archivo donde se persiste la clave hex (p.ej.
+                  ``instance/.secret_key``).
+
+    Returns:
+        Cadena hex de 64 caracteres (32 bytes) usable como ``app.secret_key``.
+    """
     _log = logging.getLogger(__name__)
     if os.path.exists(key_file):
         with open(key_file, "r") as f:
@@ -51,7 +73,13 @@ def load_or_create_secret_key(key_file: str) -> str:
 
 
 def bootstrap_users() -> None:
-    """Crea usuarios por defecto en primera ejecución (solo si la tabla está vacía)."""
+    """
+    Crea usuarios ``admin`` y ``operador`` si la tabla User está vacía (primera ejecución).
+
+    Lee DEFAULT_ADMIN_PASSWORD y DEFAULT_OPERATOR_PASSWORD del entorno; si no están
+    configuradas usa passwords débiles por defecto y emite WARNING — la intención es
+    que el operador los cambie antes de poner el sistema en producción.
+    """
     from src.system_core import User, db  # import tardío — evita circular en arranque
 
     _log = logging.getLogger(__name__)

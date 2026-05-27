@@ -1,4 +1,14 @@
-"""ConfiguraciÃ³n central del proyecto (entorno, rutas, cÃ¡mara, modelo de visiÃ³n)."""
+"""
+Módulo      : config.py
+Rol         : Fuente de verdad central de toda la configuración del sistema SIRAN.
+              Lee variables de entorno con valores por defecto explícitos; es puro
+              en lectura — nunca escribe archivos ni tiene efectos secundarios.
+Conectado con: src/system_core.py (helpers _env_bool, _env_float, _env_int importados
+              como alias privados para evitar re-definición).
+Usado por   : app.py (startup), todos los servicios y blueprints de rutas.
+Hilos       : Ninguno — solo lectura en tiempo de importación del módulo.
+Base de datos: No accede a ninguna DB directamente.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +18,7 @@ from src.system_core import env_bool as _env_bool
 from src.system_core import env_float as _env_float
 from src.system_core import env_int as _env_int
 
-# ======================== CONFIGURACIÃ"N RTSP ========================
+# ======================== CONFIGURACIÓN RTSP ========================
 RTSP_CONFIG = {
     "enabled": True,
     "url": os.environ.get("RTSP_URL", "0"),
@@ -18,7 +28,7 @@ RTSP_CONFIG = {
     "buffer_size": _env_int("RTSP_BUFFER_SIZE", 1),
 }
 
-# ======================== CONFIGURACIÃ"N ONVIF ========================
+# ======================== CONFIGURACIÓN ONVIF ========================
 ONVIF_CONFIG = {
     "host": os.environ.get("ONVIF_HOST", ""),
     "port": _env_int("ONVIF_PORT", 80),
@@ -27,7 +37,7 @@ ONVIF_CONFIG = {
     "rtsp_port": _env_int("RTSP_PORT", 554),  # puerto RTSP; si aparece como ONVIF port indica mala config
 }
 
-# ======================== CONFIGURACIÃ"N YOLO ========================
+# ======================== CONFIGURACIÓN YOLO ========================
 YOLO_CONFIG = {
     "model_path": os.environ.get("YOLO_MODEL_PATH", "runs/detect/weights/best.pt"),
     "device": os.environ.get("YOLO_DEVICE", "cuda:0"),
@@ -37,7 +47,7 @@ YOLO_CONFIG = {
     "iou_clamp_max": _env_float("IOU_CLAMP_MAX", 0.95),
 }
 
-# ======================== CONFIGURACIÃ"N PTZ ========================
+# ======================== CONFIGURACIÓN PTZ ========================
 PTZ_CONFIG = {
     # Tracking — cuándo y con qué velocidad mover la cámara
     "target_ttl":       _env_float("PTZ_TRACKING_TARGET_TTL",       3.0),   # RO-04: T=3 s
@@ -84,7 +94,7 @@ TRACKER_CONFIG = {
     "min_hits":      _env_int("TRACKER_MIN_HITS",         1),
 }
 
-# ======================== CONFIGURACIÃ"N DE VIDEO ========================
+# ======================== CONFIGURACIÓN DE VIDEO ========================
 VIDEO_CONFIG = {
     "width": _env_int("VIDEO_WIDTH", 1280),
     "height": _env_int("VIDEO_HEIGHT", 720),
@@ -93,7 +103,7 @@ VIDEO_CONFIG = {
     "inference_interval": _env_int("INFERENCE_INTERVAL", 1),
 }
 
-# ======================== CONFIGURACIÃ"N DE FLASK ========================
+# ======================== CONFIGURACIÓN DE FLASK ========================
 FLASK_CONFIG = {
     "debug": _env_bool("FLASK_DEBUG", False),
     "host": os.environ.get("FLASK_HOST", "0.0.0.0"),
@@ -118,7 +128,7 @@ SECURITY_CONFIG = {
     "detection_persistence_frames": _env_int("DETECTION_PERSISTENCE_FRAMES", 3),
 }
 
-# ======================== CONFIGURACIÃ"N DE ALMACENAMIENTO ========================
+# ======================== CONFIGURACIÓN DE ALMACENAMIENTO ========================
 STORAGE_CONFIG = {
     "db_path": os.environ.get("SQLITE_DB_PATH", "detections.db"),
     "upload_folder": os.environ.get("UPLOAD_FOLDER", "uploads"),

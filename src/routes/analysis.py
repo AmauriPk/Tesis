@@ -1,3 +1,19 @@
+"""
+Módulo      : src/routes/analysis.py
+Rol         : Blueprint de análisis manual (upload de imagen/video con inferencia YOLO).
+              ``/upload_detect`` encola un job asíncrono y devuelve ``job_id``;
+              ``/video_progress`` hace polling del estado del job.
+              Para videos: exporta Top-10 frames con mayor confianza al dataset
+              de recolección (limpias/ + con_bounding_box/).
+Conectado con: src/video_processor.py (draw_detections),
+              src/services/video_export_service.py (create_video_writer,
+              make_browser_compatible_mp4), src/system_core.py (FrameRecord),
+              config.py (VIDEO_CONFIG, YOLO_CONFIG).
+Usado por   : app.py (registra analysis_bp; init_analysis_routes(**deps)).
+Hilos       : job_lock (threading.Lock) protege progress_by_job / result_by_job;
+              cada job corre en un daemon thread para no bloquear la UI.
+Base de datos: detections.db (encola FrameRecord a MetricsDBWriter para telemetría).
+"""
 from __future__ import annotations
 
 import base64

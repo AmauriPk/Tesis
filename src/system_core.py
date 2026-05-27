@@ -1,4 +1,20 @@
-"""Sirve para utilidades del sistema, entidades DB, control PTZ y telemetrÃ­a en un solo mÃ³dulo."""
+"""
+Módulo      : system_core.py
+Rol         : Núcleo compartido del sistema SIRAN. Agrupa en un solo módulo los
+              helpers de entorno, las entidades SQLAlchemy (User, CameraConfig),
+              el control ONVIF (PTZController), el dataclass de frame (FrameRecord)
+              y el escritor asíncrono de telemetría (MetricsDBWriter). Se importa
+              desde config.py, app.py y todos los servicios.
+Conectado con: config.py (solo sus env-helpers son re-exportados),
+              src/services/crypto_service.py (_EncryptedString),
+              flask_sqlalchemy, flask_login, werkzeug.security, onvif-zeep.
+Usado por   : app.py (db, User, CameraConfig, PTZController, FrameRecord,
+              MetricsDBWriter), src/services/* y src/routes/*.
+Hilos       : MetricsDBWriter corre un hilo daemon de escritura por lotes.
+              PTZController es instanciado por PTZCommandWorker en su propio hilo.
+Base de datos: detections.db (MetricsDBWriter vía _open_db en WAL mode),
+              app.db (SQLAlchemy — User, CameraConfig).
+"""
 
 from __future__ import annotations
 
@@ -24,7 +40,15 @@ from src.services.crypto_service import decrypt as _decrypt, encrypt as _encrypt
 
 
 class _EncryptedString(TypeDecorator):
-    """Cifra en escritura y descifra en lectura de forma transparente."""
+    """
+    Tipo SQLAlchemy personalizado que cifra en escritura y descifra en lectura.
+
+    Responsabilidad: ser invisible para el resto del modelo — CameraConfig usa
+    columnas normales pero los valores en SQLite siempre llegan cifrados.
+    Ciclo de vida  : instanciado como tipo de columna; vive mientras la app corre.
+    Atributos clave: ``impl = String`` (almacenamiento base), ``cache_ok = True``
+                     (requerido por SQLAlchemy 1.4+ para cache de queries).
+    """
     impl = _SAString
     cache_ok = True
 
@@ -43,6 +67,17 @@ class _EncryptedString(TypeDecorator):
 
 
 def env_bool(name: str, default: bool) -> bool:
+    """
+    Lee una variable de entorno y la interpreta como booleano.
+
+    Args:
+        name: Nombre de la variable de entorno.
+        default: Valor si la variable no está definida o tiene valor inválido.
+
+    Returns:
+        True para "1/true/t/yes/y/on"; False para "0/false/f/no/n/off";
+        ``default`` si el valor no encaja con ninguna de las variantes.
+    """
     value = os.environ.get(name)
     if value is None:
         return default
@@ -55,6 +90,16 @@ def env_bool(name: str, default: bool) -> bool:
 
 
 def env_int(name: str, default: int) -> int:
+    """
+    Lee una variable de entorno y la convierte a entero.
+
+    Args:
+        name: Nombre de la variable de entorno.
+        default: Valor si la variable no está definida o no es un entero válido.
+
+    Returns:
+        Entero parseado, o ``default`` ante cualquier excepción de conversión.
+    """
     value = os.environ.get(name)
     if value is None:
         return default
@@ -65,6 +110,16 @@ def env_int(name: str, default: int) -> int:
 
 
 def env_float(name: str, default: float) -> float:
+    """
+    Lee una variable de entorno y la convierte a float.
+
+    Args:
+        name: Nombre de la variable de entorno.
+        default: Valor si la variable no está definida o no es un float válido.
+
+    Returns:
+        Float parseado, o ``default`` ante cualquier excepción de conversión.
+    """
     value = os.environ.get(name)
     if value is None:
         return default
@@ -75,15 +130,51 @@ def env_float(name: str, default: float) -> float:
 
 
 def clamp(value: float, min_val: float, max_val: float) -> float:
+    """
+    Limita ``value`` al rango ``[min_val, max_val]``.
+
+    Usado intensivamente en el control PTZ para que los vectores de velocidad
+    nunca excedan los límites del hardware ONVIF (±1.0).
+
+    Args:
+        value: Valor a limitar.
+        min_val: Límite inferior.
+        max_val: Límite superior.
+
+    Returns:
+        ``value`` dentro del rango ``[min_val, max_val]``.
+    """
     return float(max(min_val, min(max_val, float(value))))
 
 
 def bbox_area(bbox: tuple[int, int, int, int]) -> int:
+    """
+    Área en píxeles de un bounding box xyxy.
+
+    Args:
+        bbox: Tupla ``(x1, y1, x2, y2)`` en coordenadas de pixel.
+
+    Returns:
+        Área en píxeles cuadrados (mínimo 0).
+    """
     x1, y1, x2, y2 = bbox
     return max(0, int(x2) - int(x1)) * max(0, int(y2) - int(y1))
 
 
 def select_priority_detection(detection_list: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """
+    Selecciona la detección de mayor área para el seguimiento PTZ.
+
+    Regla de priorización de enjambre (Regla 5 de app.py): el tracking PTZ
+    se centra en el bounding box MÁS GRANDE — asume que el UAV más cercano
+    o el más amenazante es el que ocupa más área en el encuadre.
+
+    Args:
+        detection_list: Lista de detecciones con clave ``"bbox"`` (xyxy).
+
+    Returns:
+        La detección con mayor área, o None si la lista está vacía.
+    """
     if not detection_list:
         return None
     return max(detection_list, key=lambda d: bbox_area(tuple(d["bbox"])))
@@ -113,7 +204,20 @@ def iou_matrix(bboxes_a: list, bboxes_b: list) -> "Any":
 
 
 def _open_db(path: str, *, timeout: float = 10.0) -> sqlite3.Connection:
-    """Abre una conexión SQLite con WAL + synchronous=NORMAL + foreign_keys."""
+    """
+    Abre una conexión SQLite con configuración optimizada para escrituras concurrentes.
+
+    WAL (Write-Ahead Log) permite lecturas y escrituras simultáneas desde múltiples
+    hilos sin bloqueos exclusivos — crítico porque MetricsDBWriter, DetectionEventWriter
+    y las rutas Flask consultan detections.db al mismo tiempo.
+
+    Args:
+        path: Ruta al archivo SQLite.
+        timeout: Segundos de espera ante bloqueos (default 10 s).
+
+    Returns:
+        Conexión SQLite con check_same_thread=False (seguro con GIL + WAL).
+    """
     con = sqlite3.connect(str(path), timeout=float(timeout), check_same_thread=False)
     con.execute("PRAGMA journal_mode=WAL;")
     con.execute("PRAGMA synchronous=NORMAL;")
@@ -127,6 +231,14 @@ db = SQLAlchemy()
 
 
 class User(db.Model, UserMixin):
+    """
+    Entidad de usuario de la aplicación (autenticación Flask-Login).
+
+    Responsabilidad: autenticar operadores y administradores.
+    Ciclo de vida  : creado por bootstrap_users() en primera ejecución; persistido
+                     en app.db tabla ``users``.
+    Atributos clave: ``role`` (``"admin"`` | ``"operator"``), ``username``, ``password_hash``.
+    """
     __tablename__ = "users"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -143,6 +255,16 @@ class User(db.Model, UserMixin):
 
 
 class CameraConfig(db.Model):
+    """
+    Configuración de cámara persistida en app.db (singleton — una sola fila).
+
+    Responsabilidad: almacenar URL RTSP, credenciales ONVIF y tipo de cámara
+                     (fija/PTZ) de forma persistente entre reinicios.
+    Ciclo de vida  : creado/leído por CameraConfigService.get_or_create_camera_config()
+                     en cada arranque.
+    Atributos clave: ``camera_type`` ("fixed"|"ptz"), ``rtsp_url``, ``onvif_host``,
+                     ``onvif_password`` (cifrado via _EncryptedString).
+    """
     __tablename__ = "camera_config"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -160,6 +282,16 @@ class CameraConfig(db.Model):
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def effective_rtsp_url(self) -> str | None:
+        """
+        Construye la URL RTSP con credenciales embebidas si no ya las tiene.
+
+        Inyectar user:pass en la URL es la forma más compatible con OpenCV
+        para streams RTSP autenticados — muchas cámaras IP no aceptan Basic Auth
+        por cabeceras HTTP, solo en la URL.
+
+        Returns:
+            URL RTSP con credenciales, o None si rtsp_url no está configurada.
+        """
         if not self.rtsp_url:
             return None
         if "://" not in self.rtsp_url:
@@ -176,6 +308,17 @@ class CameraConfig(db.Model):
 
 
 class PTZController:
+    """
+    Controlador ONVIF para cámaras PTZ (Pan-Tilt-Zoom).
+
+    Responsabilidad: abstraer la comunicación ONVIF/WSDL para enviar comandos
+                     ContinuousMove y Stop. Gestiona la sesión ONVIF con reconexión
+                     automática ante fallos Zeep.
+    Ciclo de vida  : instanciado por PTZCommandWorker y admin_camera routes;
+                     la conexión ONVIF se establece lazy en el primer comando.
+    Atributos clave: ``host``, ``port``, ``username``, ``password``,
+                     ``_ptz`` (servicio ONVIF), ``_profile`` (perfil seleccionado).
+    """
     def __init__(
         self,
         host: str,
@@ -313,11 +456,22 @@ class PTZController:
         self._is_moving = False
 
 
-# ======================== TELEMETRÃA (SQLite) ========================
+# ======================== TELEMETRÍA (SQLite) ========================
 
 
 @dataclass(frozen=True, slots=True)
 class FrameRecord:
+    """
+    Moneda de intercambio entre el pipeline de video y los escritores de DB.
+
+    Responsabilidad: transportar todos los datos de un frame procesado en un
+                     objeto inmutable (frozen) para que los escritores async
+                     puedan serializarlo sin riesgo de race conditions.
+    Ciclo de vida  : creado en LiveVideoProcessor._run() por cada frame inferido,
+                     encolado en MetricsDBWriter y DetectionEventWriter.
+    Atributos clave: ``inference_ms`` (latencia de inferencia), ``detections``
+                     (lista de dicts con bbox/confidence), ``confirmed`` (bool).
+    """
     timestamp_iso: str
     source: str
     inference_ms: float
@@ -329,6 +483,16 @@ class FrameRecord:
 
 
 class MetricsDBWriter:
+    """
+    Escritor asíncrono de telemetría de frames a detections.db.
+
+    Responsabilidad: desacoplar el pipeline de video de las escrituras SQLite.
+                     Emplea una cola in-memory (queue.Queue) y un hilo daemon
+                     que realiza inserciones por lotes para minimizar latencia.
+    Ciclo de vida  : instanciado en app.py al arranque; el hilo daemon inicia
+                     automáticamente si enabled=True; termina via stop().
+    Atributos clave: ``_q`` (cola de FrameRecord), ``_stop`` (Event de apagado).
+    """
     def __init__(self, db_path: str, *, enabled: bool = True, queue_max: int = 5000) -> None:
         self.db_path = str(db_path)
         self.enabled = bool(enabled)

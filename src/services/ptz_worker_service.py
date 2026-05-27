@@ -1,3 +1,17 @@
+"""
+Módulo      : ptz_worker_service.py
+Rol         : Worker asíncrono de comandos PTZ (hilo separado + cola).
+              Desacopla los llamantes (tracking, joystick, inspección) del protocolo
+              ONVIF bloqueante; aplica rate-limit y backpressure.
+Conectado con: config.py (ONVIF_CONFIG), src/system_core.py (PTZController),
+              src/services/camera_config_service.py (get_or_create_camera_config).
+Usado por   : app.py (instancia ptz_worker, lo pasa a todos los workers y rutas),
+              src/services/tracking_worker_service.py (enqueue_move),
+              src/services/inspection_patrol_service.py (enqueue_move/stop),
+              src/routes/ptz_manual.py (enqueue_direction/move/stop).
+Hilos       : _thread (daemon) procesa la cola; los llamantes son otros hilos.
+Base de datos: No accede a ninguna DB.
+"""
 from __future__ import annotations
 
 import logging

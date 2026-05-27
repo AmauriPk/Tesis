@@ -1,3 +1,14 @@
+"""
+Módulo      : src/routes/model_params.py
+Rol         : Blueprint para actualizar parámetros del modelo de detección en caliente
+              (sin reiniciar el servidor).  Solo accesible para el rol admin.
+              Valida rangos de confidence_threshold, iou_threshold y persistence_frames.
+Conectado con: src/services/model_params_service.py (update_model_params — hot update),
+              config.py (límites de parámetros implícitos).
+Usado por   : app.py (registra model_params_bp; init_model_params_routes(**deps)).
+Hilos       : Ninguno — update_model_params usa un Lock interno.
+Base de datos: No accede a ninguna DB directamente.
+"""
 from __future__ import annotations
 
 from typing import Any, Callable

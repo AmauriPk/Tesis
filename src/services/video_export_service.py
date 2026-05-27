@@ -1,13 +1,15 @@
 """
-Servicio de exportación/conversión de video procesado.
-
-Responsabilidades:
-- Inicializar cv2.VideoWriter con fallback de codecs.
-- Resolver el ejecutable FFmpeg disponible en el entorno.
-- Transcodificar un video raw a MP4 compatible con navegador.
-- Validar que un archivo de video de salida exista y tenga contenido.
-
-No depende de variables globales de app.py ni de Flask.
+Módulo      : video_export_service.py
+Rol         : Exportación y transcodificación de video procesado por el pipeline
+              de análisis manual. Abstrae la complejidad de codecs (cv2.VideoWriter
+              con fallback de codecs) y la conversión a MP4 reproducible en
+              navegador vía FFmpeg (libx264 → mpeg4 → descarga).
+Conectado con: config.py (STORAGE_CONFIG['ffmpeg_bin']), cv2, subprocess,
+              imageio_ffmpeg (opcional — resolución alternativa de FFmpeg).
+Usado por   : src/routes/analysis.py (_process_video_and_persist — jobs manuales).
+Hilos       : Los jobs de análisis corren en hilos separados (ver analysis.py);
+              este módulo no mantiene estado propio.
+Base de datos: No accede a ninguna DB.
 """
 from __future__ import annotations
 
@@ -66,9 +68,20 @@ def resolve_ffmpeg_bin() -> str | None:
 
 def create_video_writer(output_path: str, fps: float, width: int, height: int):
     """
-    Intenta abrir un cv2.VideoWriter con fallback de codecs.
+    Abre un ``cv2.VideoWriter`` probando codecs en orden: mp4v → XVID → MJPG.
 
-    Devuelve (writer, path_efectivo, codec_usado) o (None, None, None) si falla todo.
+    La secuencia de fallback existe porque no todos los entornos tienen los
+    codecs instalados; XVID/MJPG son más compatibles en sistemas sin libx264.
+
+    Args:
+        output_path: Ruta de salida preferida (p.ej. ``result_abc.mp4``).
+        fps: Fotogramas por segundo del video de salida.
+        width: Ancho en píxeles.
+        height: Alto en píxeles.
+
+    Returns:
+        Tupla ``(writer, path_efectivo, codec_usado)`` si se pudo abrir el
+        writer, o ``(None, None, None)`` si todos los codecs fallaron.
     """
     candidates = [
         ("mp4v", output_path),
@@ -103,10 +116,20 @@ def create_video_writer(output_path: str, fps: float, width: int, height: int):
 
 def transcode_to_browser_mp4(input_path: str, output_path: str) -> tuple[bool, str | None]:
     """
-    Intenta transcodificar `input_path` a un MP4 reproducible en navegador.
+    Transcodifica ``input_path`` a un MP4 reproducible en navegador (H.264/yuv420p).
 
-    - No debe romper el análisis si falla.
-    - Preferimos libx264; fallback mpeg4 si libx264 no está disponible.
+    Intenta ``libx264`` primero (mayor compatibilidad con Chrome/Edge/Safari);
+    si falla, prueba ``mpeg4`` como fallback. El flag ``+faststart`` mueve
+    los metadatos al inicio del archivo para permitir streaming progresivo.
+
+    Args:
+        input_path: Ruta del video raw generado por ``create_video_writer``.
+        output_path: Ruta de destino para el MP4 final.
+
+    Returns:
+        Tupla ``(ok, reason)`` donde ``ok`` es True si la transcodificación
+        produjo un archivo válido, y ``reason`` es None (éxito),
+        ``"ffmpeg_missing"`` o ``"transcode_failed"`` (fallo).
     """
     in_path = str(input_path)
     out_path = str(output_path)

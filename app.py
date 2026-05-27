@@ -1,17 +1,25 @@
-from __future__ import annotations
 """
-SIRAN — Sistema Integrado de Reconocimiento de Aeronaves No Tripuladas (tesis).
-
+Módulo      : app.py
+Rol         : Punto de entrada de SIRAN. Crea la app Flask, inicializa todos los
+              servicios y workers, registra los 10 blueprints con sus dependencias
+              inyectadas y define hooks globales (before_request, after_request).
 Reglas INTRANSFERIBLES (NO eliminar; solo optimizar/refactorizar):
-1) YOLO26 en GPU (cuda:0) para inferencia.
-2) Ingesta de video RTSP y entrega MJPEG vía `multipart/x-mixed-replace`.
-3) ONVIF Auto-Discovery asíncrono (hilos) para determinar si la cámara es PTZ o Fija:
-   - Si es fija: bloquear rutas de movimiento PTZ.
-   - Si es PTZ: permitir joystick y tracking automático.
-4) Frontend: ocultar/mostrar joystick basándose en la respuesta del Auto-Discovery.
-5) Regla de priorización (Enjambre): el tracking PTZ se centra en el bounding box MÁS GRANDE.
-6) Mitigación de aves: persistencia de frames antes de confirmar una detección.
+  1) YOLO en GPU (cuda:0) para inferencia en vivo.
+  2) Ingesta de video RTSP y entrega MJPEG vía multipart/x-mixed-replace.
+  3) ONVIF Auto-Discovery asíncrono para detectar si la cámara es PTZ o Fija.
+  4) Frontend: ocultar/mostrar joystick según resultado del Auto-Discovery.
+  5) Regla de priorización (Enjambre): tracking PTZ al bounding box MÁS GRANDE.
+  6) Mitigación de aves: persistencia de N frames antes de confirmar detección.
+Conectado con: config.py (todas las secciones de CONFIG), src/system_core.py,
+              src/video_processor.py, src/services/*.py, src/routes/*.py.
+Usado por   : Servidor WSGI (gunicorn / flask run); atexit.register para shutdown.
+Hilos       : RTSPLatestFrameReader, LiveVideoProcessor, MetricsDBWriter,
+              DetectionEventWriter, PTZCommandWorker, TrackingPTZWorker,
+              _InspectionPatrolWorker — todos daemons.
+Base de datos: app.db (SQLAlchemy: User, CameraConfig),
+              detections.db (SQLite WAL: inference_frames, detections_v2, detection_events).
 """
+from __future__ import annotations
 import logging
 import logging.handlers
 import os
@@ -224,14 +232,17 @@ camera_config_service = CameraConfigService(
 
 
 def sync_onvif_config_from_env(cfg: CameraConfig) -> CameraConfig:
+    """Delega a CameraConfigService: sobreescribe campos ONVIF con variables de entorno si existen."""
     return camera_config_service.sync_onvif_config_from_env(cfg)
 
 
 def _normalized_onvif_port(port: int | None) -> int:
+    """Normaliza el puerto ONVIF: devuelve 80 si el valor es None o es el puerto RTSP (554)."""
     return camera_config_service.normalized_onvif_port(port)
 
 
 def get_or_create_camera_config() -> CameraConfig:
+    """Retorna la configuración de cámara activa (la crea con defaults si no existe en DB)."""
     return camera_config_service.get_or_create_camera_config()
 
 # ======================== YOLO MODEL ========================
@@ -243,6 +254,7 @@ _metrics_writer = MetricsDBWriter(
 )
 
 def _get_metrics_db_path_abs() -> str:
+    """Devuelve la ruta absoluta de detections.db; la convierte si es relativa al root_path."""
     db_path = STORAGE_CONFIG.get("db_path", "detections.db")
     db_path = str(db_path or "detections.db")
     if db_path and not os.path.isabs(db_path):
@@ -258,6 +270,13 @@ _event_writer = DetectionEventWriter(
 
 
 def _metrics_enqueue_with_events(record: FrameRecord) -> None:
+    """
+    Encola el FrameRecord en ambos escritores asíncronos de forma atómica.
+
+    MetricsDBWriter persiste inference_frames/detections_v2;
+    DetectionEventWriter agrupa detecciones confirmadas en detection_events.
+    Ambas operaciones son non-blocking (put_nowait con drop silencioso si Full).
+    """
     _metrics_writer.enqueue(record)
     _event_writer.enqueue(record)
 
@@ -277,14 +296,22 @@ model_params_lock = model_params_service.lock
 # Esto NO hace ping a la cámara: sólo refleja configuración persistida / último test admin.
 
 def _update_tracking_target(payload: dict) -> None:
+    """Actualiza el objetivo de tracking en PTZStateService (llamado desde LiveVideoProcessor)."""
     ptz_state_service.update_tracking_target(payload)
 
 
 def _get_tracking_target_snapshot() -> dict:
+    """Retorna una copia del estado actual del objetivo de tracking (thread-safe)."""
     return ptz_state_service.get_tracking_target_snapshot()
 
 
 def _tracking_target_is_recent() -> tuple[bool, float]:
+    """
+    Indica si el objetivo de tracking es reciente (dentro de target_ttl segundos, RO-04).
+
+    Returns:
+        ``(is_recent: bool, age_s: float)`` — is_recent=True si hay target y age <= ttl.
+    """
     snap = _get_tracking_target_snapshot()
     now = time.time()
     ttl = float(_clamp(PTZ_CONFIG["target_ttl"], 0.5, 3.0))
@@ -344,18 +371,22 @@ last_confirmed_detection_at: float | None = None
 
 
 def set_auto_tracking_enabled(value: bool) -> None:
+    """Activa/desactiva el tracking automático PTZ (wrapper sobre PTZStateService)."""
     ptz_state_service.set_auto_tracking_enabled(bool(value))
 
 
 def get_auto_tracking_enabled() -> bool:
+    """Devuelve si el tracking automático PTZ está activo (wrapper sobre PTZStateService)."""
     return bool(ptz_state_service.get_auto_tracking_enabled())
 
 
 def set_inspection_mode_enabled(value: bool) -> None:
+    """Activa/desactiva el modo de inspección/patrullaje PTZ (wrapper sobre PTZStateService)."""
     ptz_state_service.set_inspection_mode_enabled(bool(value))
 
 
 def get_inspection_mode_enabled() -> bool:
+    """Devuelve si el modo de inspección PTZ está activo (wrapper sobre PTZStateService)."""
     return bool(ptz_state_service.get_inspection_mode_enabled())
 
 # Tracking PTZ (separado del hilo de video)
@@ -508,6 +539,12 @@ live_deps = LiveStreamDeps(
 )
 
 def _ptz_tracking_move(**kwargs):
+    """
+    Adapter: convierte el payload de PTZ tracking a enqueue_move con source="tracking".
+
+    Usa duration_s=0.25 fija para estabilidad (evita micro-correcciones erráticas).
+    El source distingue los movimientos de tracking de los manuales en los logs.
+    """
     x = float(kwargs.get("x") or 0.0)
     y = float(kwargs.get("y") or 0.0)
     z = float(kwargs.get("zoom") or 0.0)
@@ -651,6 +688,13 @@ def api_inspection_test_move():
 # ======================== SECURITY HEADERS ========================
 @app.after_request
 def set_security_headers(response):
+    """
+    Añade cabeceras de seguridad HTTP a todas las respuestas (RNF-05).
+
+    Cabeceras incluidas: X-Frame-Options (clickjacking), X-Content-Type-Options
+    (MIME sniffing), X-XSS-Protection, Referrer-Policy, Content-Security-Policy
+    (restringe fuentes de scripts/estilos/imágenes a self).
+    """
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-XSS-Protection"] = "1; mode=block"
@@ -687,6 +731,12 @@ if __name__ == "__main__":
     )
 
 def _shutdown_resources() -> None:
+    """
+    Para los recursos con estado de forma ordenada al salir del proceso (atexit).
+
+    Detiene LiveVideoProcessor, RTSPLatestFrameReader y MetricsDBWriter con timeout
+    de 2 s cada uno para no bloquear el shutdown de gunicorn/Flask.
+    """
     try:
         live_processor.stop(timeout_s=2.0)
     except Exception:

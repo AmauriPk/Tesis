@@ -1,3 +1,17 @@
+"""
+Módulo      : src/routes/ptz_manual.py
+Rol         : Blueprint de control PTZ manual (joystick + vector libre).
+              ``/ptz_move`` encola movimientos al PTZCommandWorker;
+              ``/api/ptz_stop`` envía STOP y, si viene de source="manual",
+              desactiva el tracking automático e invalida el objetivo PTZ.
+Conectado con: src/services/ptz_worker_service.py (enqueue_move/stop/direction),
+              src/services/ptz_service.py (PTZStateService — tracking flags/target,
+              PTZCapabilityService.is_ptz_ready_for_manual),
+              config.py (ONVIF_CONFIG — rtsp_port detection).
+Usado por   : app.py (registra ptz_manual_bp; init_ptz_manual_routes(**deps)).
+Hilos       : state_lock (RLock) y tracking_target_lock (Lock) protegen estado compartido.
+Base de datos: No accede a ninguna DB.
+"""
 from __future__ import annotations
 
 import logging

@@ -1,4 +1,19 @@
-"""PTZStateService y PTZCapabilityService consolidados en un único módulo."""
+"""
+Módulo      : ptz_service.py
+Rol         : Estado centralizado de automatización PTZ y capacidad de hardware.
+              PTZStateService guarda flags (auto_tracking, inspection_mode) y
+              el objetivo de tracking con locks. PTZCapabilityService gestiona
+              el autodescubrimiento ONVIF y expone los predicados de readiness.
+Conectado con: config.py (ONVIF_CONFIG, SECURITY_CONFIG),
+              src/services/camera_state_service.py (is_camera_configured_ptz).
+Usado por   : app.py (instancia ambos servicios al arranque y los pasa a workers
+              y routes), src/services/tracking_worker_service.py,
+              src/services/inspection_patrol_service.py, src/routes/automation.py.
+Hilos       : state_lock (RLock) y tracking_target_lock (Lock) protegen el estado
+              compartido accedido simultáneamente por el hilo de video, los workers
+              PTZ y los request handlers de Flask.
+Base de datos: No accede a DB directamente.
+"""
 from __future__ import annotations
 
 import logging
@@ -16,8 +31,12 @@ class PTZStateService:
     """
     Estado centralizado de automatización PTZ (flags + objetivo de tracking).
 
-    Este servicio NO controla el PTZ ni mueve cámara; solo mantiene estado compartido
-    con locks para lectura/escritura segura.
+    Responsabilidad: ser la única fuente de verdad para auto_tracking_enabled,
+                     inspection_mode_enabled y el último bounding box del objetivo.
+                     NO controla el PTZ — eso es responsabilidad de PTZCommandWorker.
+    Ciclo de vida  : instanciado una vez en app.py; nunca se recrea.
+    Atributos clave: ``state_lock`` (RLock compartido con app.py),
+                     ``tracking_target_lock``, ``tracking_target_state`` (dict).
     """
 
     def __init__(self) -> None:
@@ -62,6 +81,17 @@ class PTZStateService:
             self.tracking_target_state["updated_at"] = 0.0
 
     def update_tracking_target(self, payload: dict) -> None:
+        """
+        Actualiza el objetivo de tracking con el bbox del último frame confirmado.
+
+        Llamado desde LiveVideoProcessor._run() en cada frame con detección
+        confirmada — el TrackingPTZWorker lee este estado para calcular el
+        vector de corrección PTZ.
+
+        Args:
+            payload: Dict con ``has_target``, ``bbox`` (xyxy), ``frame_w``,
+                     ``frame_h``, ``confidence``, ``updated_at``.
+        """
         try:
             has_target = bool(payload.get("has_target"))
             bbox = payload.get("bbox")
@@ -91,11 +121,15 @@ class PTZStateService:
 
 class PTZCapabilityService:
     """
-    Servicio para manejar:
-    - capacidad PTZ descubierta por ONVIF (autodescubrimiento);
-    - readiness para PTZ manual / automatización;
-    - logs controlados de readiness;
-    - estado auxiliar del último probe ONVIF.
+    Gestiona la capacidad PTZ descubierta por ONVIF y los predicados de readiness.
+
+    Responsabilidad: separar "la cámara es PTZ según el Admin" (camera_state_service)
+                     de "la cámara respondió ONVIF PTZ" (autodescubrimiento). Un
+                     sistema es ready-for-automation si cualquiera de los dos es True.
+    Ciclo de vida  : instanciado en app.py; ``probe_onvif_ptz_capability()`` se llama
+                     en el arranque y después de guardar nueva config de cámara.
+    Atributos clave: ``is_ptz_capable`` (resultado del último probe ONVIF),
+                     ``camera_source_mode`` ("fixed"|"ptz" — enviado al frontend).
     """
 
     def __init__(

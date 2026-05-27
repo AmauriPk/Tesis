@@ -1,3 +1,17 @@
+"""
+Módulo      : tracking_worker_service.py
+Rol         : Worker de seguimiento PTZ automático. Calcula el error de encuadre
+              del objetivo y envía comandos PTZ proporcionales (RO-05). Gestiona
+              readquisición activa (RO-04) y continuidad IoU (RO-06).
+Conectado con: config.py (PTZ_CONFIG — k_pan, k_tilt, tolerance, etc.),
+              src/services/ptz_worker_service.py (enqueue_move),
+              src/services/ptz_service.py (get_tracking_target_snapshot),
+              src/video_processor.py (bbox_iou_xyxy).
+Usado por   : app.py (instancia tracking_worker, llama start()).
+Hilos       : _thread (daemon) corre el loop de control PTZ; recibe el objetivo
+              desde PTZStateService que es actualizado por el hilo de video.
+Base de datos: No accede a DB directamente.
+"""
 from __future__ import annotations
 
 import logging
@@ -14,9 +28,14 @@ logger = logging.getLogger(__name__)
 
 class ReacquisitionPattern:
     """
-    Genera secuencia de movimientos de búsqueda tras pérdida de target.
-    Patrón: L → R → L+arriba → R+arriba → L+abajo → R+abajo → arriba → abajo
-    Simula barrido angular ±15° usando ContinuousMove con pulsos cortos.
+    Genera la secuencia de movimientos de barrido tras pérdida de objetivo (RO-04).
+
+    Responsabilidad: ejecutar una búsqueda sistemática de 8 pasos durante
+                     ``reacq_duration_s`` segundos, alternando pan/tilt con
+                     pulsos cortos y pausas entre ellos para no sobrecargar el PTZ.
+    Patrón (8 pasos): L → R → L+arriba → R+arriba → L+abajo → R+abajo → arriba → abajo.
+    Ciclo de vida  : instanciado por TrackingPTZWorker al perder el objetivo;
+                     descartado cuando ``expired`` es True o se readquiere target.
     """
 
     _PATTERN = [
@@ -69,6 +88,19 @@ class ReacquisitionPattern:
 
 
 class TrackingPTZWorker:
+    """
+    Worker de control proporcional PTZ para seguimiento de UAV (RO-05).
+
+    Responsabilidad: en cada ciclo de 200 ms, leer el objetivo de tracking,
+                     calcular el error de encuadre (x_err, y_err normalizado a [-1,1])
+                     y enviarlo como ``pan_cmd = k_pan * error_x``,
+                     ``tilt_cmd = -k_tilt * error_y`` (signo negativo: eje Y invertido).
+                     Implementa zona de tolerancia ±15% (RO-03), continuidad IoU (RO-06)
+                     y readquisición activa tras TTL expirado (RO-04).
+    Ciclo de vida  : instanciado en app.py al arranque; start() inicia el hilo daemon.
+    Atributos clave: ``_reacq`` (ReacquisitionPattern activo), ``_prev_bbox`` (bbox
+                     del frame anterior para check IoU), ``_discontinuity_count``.
+    """
     def __init__(
         self,
         *,

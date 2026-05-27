@@ -1,3 +1,16 @@
+"""
+Módulo      : camera_state_service.py
+Rol         : Persistencia liviana del tipo de cámara configurado (fija/PTZ) en un
+              archivo JSON (``config_camara.json``). Esta es la fuente de verdad de
+              negocio leída por todos los hilos para decidir si habilitar PTZ.
+Conectado con: config.py (SECURITY_CONFIG para debug_camera_cfg), os/json.
+Usado por   : app.py (guardar/leer en arranque y tras cambio de config),
+              src/routes/admin_camera.py, src/routes/dashboard.py,
+              src/services/ptz_service.py (is_camera_configured_ptz).
+Hilos       : Las funciones guardar/leer usan escritura atómica (tmp + os.replace)
+              y son seguras para llamadas concurrentes desde múltiples hilos.
+Base de datos: No accede a SQLite/SQLAlchemy — persiste solo en JSON.
+"""
 from __future__ import annotations
 
 import json
@@ -40,7 +53,15 @@ def _camera_cfg_path() -> str:
 
 
 def guardar_config_camara(is_ptz: bool) -> None:
-    """Persiste en disco si la cámara está configurada como PTZ o Fija."""
+    """
+    Persiste el tipo de cámara (PTZ/Fija) en ``config_camara.json``.
+
+    Usa escritura atómica (archivo temporal + os.replace) para evitar
+    que un reinicio durante la escritura deje el JSON corrupto o vacío.
+
+    Args:
+        is_ptz: True si la cámara es PTZ, False si es fija.
+    """
     path = _camera_cfg_path()
     tmp = f"{path}.tmp"
     payload = {"is_ptz": bool(is_ptz)}

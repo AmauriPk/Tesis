@@ -1,3 +1,16 @@
+"""
+Módulo      : inspection_patrol_service.py
+Rol         : Patrullaje automático PTZ cuando el sistema está en reposo.
+              Si no hay detección confirmada durante ``idle_s`` segundos y el modo
+              inspección está habilitado, inicia un barrido continuo (sweep o 360°).
+              Se interrumpe inmediatamente cuando aparece un objetivo de tracking.
+Conectado con: config.py (PTZ_CONFIG — inspection_idle_s, inspection_mode, etc.),
+              src/services/ptz_worker_service.py (enqueue_move/stop),
+              src/services/ptz_service.py (is_ptz_ready_for_automation).
+Usado por   : app.py (instancia inspection_worker, llama start()).
+Hilos       : _thread (daemon) corre el loop de patrullaje con sleep de 1s.
+Base de datos: No accede a DB directamente.
+"""
 from __future__ import annotations
 
 import logging
@@ -13,10 +26,20 @@ logger = logging.getLogger(__name__)
 
 class _InspectionPatrolWorker:
     """
-    Patrullaje automático:
-    - Solo aplica si hardware PTZ (fail-safe por autodescubrimiento ONVIF).
-    - Si no hay detección confirmada en los últimos N segundos, pan lento y continuo.
-    - Si aparece amenaza (detección confirmada), se interrumpe y el tracking toma control.
+    Worker de patrullaje automático PTZ cuando el sistema está en reposo.
+
+    Responsabilidad: mover la cámara lentamente cuando no hay detecciones activas
+                     para cubrir el área de vigilancia. Al detectar un UAV, se silencia
+                     y cede el control al TrackingPTZWorker.
+    Ciclo de vida  : instanciado en app.py al arranque; hilo daemon con sleep de 1s.
+    Modos de patrullaje (PTZ_CONFIG["inspection_mode"]):
+        - ``"sweep"``            : barrido izquierda-derecha alternado.
+        - ``"continuous_360"``   : rotación continua en un sentido.
+    Condiciones para activar:
+        1. inspection_mode_enabled = True.
+        2. is_ptz_ready_for_automation = True.
+        3. Sin target PTZ reciente (tracking_target_is_recent = False).
+        4. Sin detección confirmada por más de ``idle_s`` segundos.
     """
 
     def __init__(

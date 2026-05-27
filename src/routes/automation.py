@@ -1,3 +1,16 @@
+"""
+Módulo      : src/routes/automation.py
+Rol         : Blueprint de automatización PTZ: expone GET/POST para los flags
+              ``auto_tracking_enabled`` e ``inspection_mode_enabled``.
+              Al activar, verifica que la cámara sea PTZ-capable antes de habilitar;
+              al desactivar, envía STOP al PTZ worker.
+Conectado con: src/services/ptz_service.py (PTZStateService — get/set flags,
+              PTZCapabilityService.is_ptz_ready_for_automation),
+              src/services/ptz_worker_service.py (enqueue_stop).
+Usado por   : app.py (registra automation_bp; init_automation_routes(**deps)).
+Hilos       : state_lock (RLock compartido) protege los flags contra concurrencia.
+Base de datos: No accede a ninguna DB.
+"""
 from __future__ import annotations
 
 from typing import Any, Callable

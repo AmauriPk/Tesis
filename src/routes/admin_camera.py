@@ -1,3 +1,18 @@
+"""
+Módulo      : src/routes/admin_camera.py
+Rol         : Blueprint exclusivo del rol admin para configurar la cámara
+              (RTSP/ONVIF), probar conectividad ONVIF/PTZ, capturar snapshot RTSP
+              y persistir la configuración.  Tras guardar, dispara el re-probe ONVIF
+              automático para detectar capacidad PTZ.
+Conectado con: src/services/camera_config_service.py (get_or_create_camera_config),
+              src/services/camera_state_service.py (guardar_config_camara),
+              src/services/ptz_service.py (PTZCapabilityService.probe_onvif_ptz_capability),
+              src/system_core.py (PTZController), config.py (ONVIF_CONFIG).
+Usado por   : app.py (registra admin_camera_bp; init_admin_camera_routes(**deps)).
+Hilos       : ThreadPoolExecutor(1) para aislar llamadas ONVIF/RTSP bloqueantes
+              del request handler con timeout explícito (6 s / 7 s).
+Base de datos: app.db (SQLAlchemy — db.session.commit() para camera_config).
+"""
 from __future__ import annotations
 
 import base64
@@ -48,6 +63,13 @@ def init_admin_camera_routes(**deps: Any) -> None:
     get_model_params = _get_dep("get_model_params")
 
     def _humanize_onvif_error(err: Exception) -> str:
+        """
+        Convierte una excepción ONVIF/red en un mensaje legible para el admin.
+
+        Clasifica los errores más comunes (auth, timeout, DNS, WSDL) para que
+        el formulario de configuración muestre un mensaje accionable en vez de
+        un stack trace crudo.
+        """
         msg = (str(err) or err.__class__.__name__).strip()
         low = msg.lower()
 
@@ -92,6 +114,13 @@ def init_admin_camera_routes(**deps: Any) -> None:
             return False
 
     def _build_rtsp_url(rtsp_url: str, username: str | None, password: str | None) -> str:
+        """
+        Inserta credenciales en la URL RTSP si aún no las tiene (netloc rebuild).
+
+        Si la URL ya tiene usuario embebido o no es RTSP, la devuelve sin cambios.
+        Solo se usa para capturar snapshots de prueba — las credenciales no se
+        persisten en DB a través de este flujo.
+        """
         raw = (rtsp_url or "").strip()
         if not raw:
             return ""

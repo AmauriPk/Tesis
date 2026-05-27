@@ -1,8 +1,18 @@
 """
-src/video_processor.py
-======================
-Procesamiento de flujo de video: lectura RTSP, ejecuciÃ³n del modelo de visiÃ³n,
-persistencia por frames, telemetrÃ­a y publicaciÃ³n MJPEG.
+Módulo      : video_processor.py
+Rol         : Pipeline de procesamiento de video en vivo: lectura RTSP (hilo dedicado,
+              drop-frame), inferencia YOLO por intervalos, persistencia por N frames
+              consecutivos (DetectionPersistence), publicación MJPEG y actualización
+              del objetivo de tracking PTZ.
+Conectado con: config.py (PTZ_CONFIG, STORAGE_CONFIG, TRACKER_CONFIG, YOLO_CONFIG),
+              src/services/tracker_service.py (SORTTracker),
+              src/system_core.py (clamp, iou_pair, select_priority_detection).
+Usado por   : app.py (instancia RTSPLatestFrameReader y LiveVideoProcessor;
+              llama ensure_started() en la ruta MJPEG).
+Hilos       : RTSPLatestFrameReader._thread (daemon, captura RTSP),
+              LiveVideoProcessor._thread (daemon, inferencia + publicación MJPEG).
+Base de datos: No accede a DB directamente; publica FrameRecords a MetricsDBWriter
+              y DetectionEventWriter vía callbacks enqueue.
 """
 
 from __future__ import annotations
@@ -95,9 +105,19 @@ def dedupe_overlapping_detections(
     iou_threshold: float,
 ) -> list[dict[str, Any]]:
     """
-    Reduce cajas redundantes dentro de un mismo frame usando IoU.
+    Reduce cajas redundantes dentro de un mismo frame (NMS greedy por IoU).
 
-    Mantiene la detecciÃ³n con mayor confianza cuando hay solapamiento alto.
+    Ordena por confianza descendente y descarta cualquier caja cuyo IoU con una
+    caja ya retenida supere ``iou_threshold``. Equivale a NMS sin score-threshold
+    adicional: solo filtra solapamiento.
+
+    Args:
+        detections: Lista de dicts con campos ``"bbox"`` (x1,y1,x2,y2) y
+                    ``"confidence"``.
+        iou_threshold: Umbral de solapamiento; se clampea a [0.10, 0.90].
+
+    Returns:
+        Sublista de detecciones sin solapamiento, ordenada por confianza desc.
     """
     if not detections:
         return []
@@ -118,7 +138,19 @@ def dedupe_overlapping_detections(
 
 
 class RTSPLatestFrameReader:
-    """Lee RTSP en un hilo y conserva sÃ³lo el Ãºltimo frame (drop de frames si hay lag)."""
+    """
+    Lector RTSP dedicado: corre en un hilo daemon y conserva solo el último frame.
+
+    Responsabilidad: abstraer la reconexión automática y el drop-frame (si el hilo
+                     de inferencia va más lento que la cámara, los frames intermedios
+                     se descartan; solo importa el más reciente para minimizar latencia).
+    Ciclo de vida  : instanciado en app.py; ``start()`` lanza el hilo; ``stop()`` lo
+                     detiene con join. El hilo es daemon — no bloquea el shutdown.
+    Atributos clave: ``_frame`` (último ndarray capturado), ``_reconnect_count``
+                     (se incrementa en cada reconexión; LiveVideoProcessor lo monitorea
+                     para resetear el SORTTracker y evitar IDs de sesión anterior).
+    Thread-safety  : ``_lock`` protege ``_frame``, ``_ts``, ``_is_connected``.
+    """
 
     def __init__(
         self,
@@ -146,18 +178,33 @@ class RTSPLatestFrameReader:
         self._current_url: Optional[str] = None
 
     def start(self) -> None:
+        """Lanza el hilo de captura RTSP (idempotente)."""
         if not self._thread.is_alive():
             self._thread.start()
 
     def stop(self, *, timeout_s: float = 5.0) -> None:
+        """Señala al hilo que debe terminar y espera hasta ``timeout_s`` segundos."""
         self._stop.set()
         self._thread.join(timeout=float(timeout_s))
 
     def get_latest(self) -> tuple[Optional[np.ndarray], Optional[float]]:
+        """
+        Devuelve el último frame capturado y su timestamp epoch (thread-safe).
+
+        Returns:
+            ``(frame_ndarray, epoch_float)`` o ``(None, None)`` si aún no hay frame.
+        """
         with self._lock:
             return self._frame, self._ts
 
     def get_status(self) -> dict[str, Any]:
+        """
+        Devuelve un snapshot del estado de la conexión RTSP.
+
+        Returns:
+            Dict con: ``is_connected``, ``current_url``, ``last_frame_at``,
+            ``last_frame_age_s``, ``reconnect_count``, ``last_error``.
+        """
         with self._lock:
             now = time.time()
             last_frame_at = self._last_frame_at
@@ -172,6 +219,16 @@ class RTSPLatestFrameReader:
             }
 
     def _run(self) -> None:
+        """
+        Loop de captura RTSP.
+
+        1. Detecta cambio de URL → libera cap y reconecta.
+        2. Si cap no está abierto → abre cv2.VideoCapture, configura
+           CAP_PROP_BUFFERSIZE=1 (descarta acumulados), timeouts y resolución.
+        3. Lee frame; si falla → marca desconectado, libera cap, espera 0.5 s.
+        4. Si ok → actualiza ``_frame``, ``_ts``, ``_is_connected`` bajo lock.
+        Buffer=1 garantiza latencia mínima descartando frames intermedios.
+        """
         cap: cv2.VideoCapture | None = None
         try:
             while not self._stop.is_set():
@@ -266,13 +323,32 @@ class RTSPLatestFrameReader:
 
 
 class DetectionPersistence:
-    """Confirma detecciÃ³n tras N frames consecutivos con detecciones."""
+    """
+    Filtro de persistencia: confirma detección solo tras N frames consecutivos positivos.
+
+    Responsabilidad: reducir falsos positivos (flicker del modelo) exigiendo
+                     que la inferencia detecte en ``required_consecutive_frames``
+                     frames seguidos antes de marcar ``confirmed=True`` (RNF-02).
+    Ciclo de vida  : instanciado en LiveVideoProcessor.__init__(); el umbral se
+                     actualiza en caliente con ``set_required_consecutive_frames()``.
+    Atributos clave: ``_consecutive_hits`` (se resetea a 0 en cualquier frame vacío).
+    """
 
     def __init__(self, required_consecutive_frames: int) -> None:
         self.required_consecutive_frames = max(1, int(required_consecutive_frames))
         self._consecutive_hits = 0
 
     def update(self, has_detection: bool) -> tuple[bool, int]:
+        """
+        Avanza el contador de persistencia y devuelve el estado de confirmación.
+
+        Args:
+            has_detection: True si el frame actual tiene al menos una detección.
+
+        Returns:
+            ``(confirmed, consecutive_hits)`` — confirmed es True si
+            ``consecutive_hits >= required_consecutive_frames``.
+        """
         if has_detection:
             self._consecutive_hits += 1
         else:
@@ -281,12 +357,31 @@ class DetectionPersistence:
         return confirmed, self._consecutive_hits
 
     def set_required_consecutive_frames(self, required_consecutive_frames: int) -> None:
+        """
+        Actualiza el umbral de persistencia en caliente y resetea el contador.
+
+        Llamado por LiveVideoProcessor cuando ``persistence_frames`` cambia en
+        ModelParamsService sin reiniciar el procesador (hot-update).
+        """
         self.required_consecutive_frames = max(1, int(required_consecutive_frames))
         self._consecutive_hits = 0
 
 
 @dataclass(slots=True)
 class LiveStreamDeps:
+    """
+    Contenedor inmutable de dependencias estáticas del pipeline de video.
+
+    Agrupa la configuración que no cambia durante la ejecución del procesador
+    y que de otro modo se pasaría como kwargs sueltos al constructor.
+
+    Atributos:
+        video_config           : width, height, fps, jpeg_quality, inference_interval.
+        yolo_config            : confidence, iou_clamp_min/max, verbose.
+        detections_folder_rel  : Ruta relativa (desde app_root_path) para evidencias.
+        app_root_path          : Raíz del proyecto Flask (``app.root_path``).
+        jpeg_placeholder_text  : Texto del frame de espera mientras no hay RTSP.
+    """
     video_config: dict[str, Any]
     yolo_config: dict[str, Any]
     detections_folder_rel: str
@@ -296,11 +391,20 @@ class LiveStreamDeps:
 
 class LiveVideoProcessor:
     """
-    Pipeline live:
-    - consume frames
-    - ejecuta modelo de visiÃ³n por intervalos
-    - confirma por persistencia
-    - publica Ãºltimo JPEG para MJPEG
+    Pipeline de inferencia en vivo: consume frames RTSP, ejecuta YOLO y publica MJPEG.
+
+    Responsabilidad: coordinar el ciclo completo — leer frame, inferir con YOLO
+                     (cada ``inference_interval`` frames), filtrar con NMS,
+                     asignar track_ids (SORTTracker), confirmar por persistencia
+                     (DetectionPersistence), guardar evidencias, publicar estado
+                     al frontend y enviar el objetivo de tracking PTZ.
+    Ciclo de vida  : instanciado en app.py; ``ensure_started()`` arranca de forma
+                     lazy en la primera petición MJPEG. Hilo daemon.
+    Atributos clave: ``_tracker`` (SORTTracker — se resetea en reconexión RTSP),
+                     ``_persistence`` (actualizable en caliente),
+                     ``_latest_jpeg`` / ``_stream_lock`` (buffer MJPEG thread-safe).
+    Callbacks      : ``metrics_enqueue`` → MetricsDBWriter y DetectionEventWriter;
+                     ``update_tracking_target`` → PTZStateService (RO-04/05/06).
     """
 
     def __init__(
@@ -368,25 +472,46 @@ class LiveVideoProcessor:
         self._started = False
 
     def start(self) -> None:
+        """Lanza el hilo de procesamiento de video (idempotente)."""
         if not self._thread.is_alive():
             self._thread.start()
         self._started = True
 
     def stop(self, *, timeout_s: float = 5.0) -> None:
+        """Señala al hilo que debe terminar y espera hasta ``timeout_s`` segundos."""
         self._stop.set()
         self._thread.join(timeout=float(timeout_s))
 
     def ensure_started(self) -> None:
+        """
+        Arranca el lector RTSP y el procesador si aún no están corriendo (lazy init).
+
+        Llamado por ``mjpeg_generator()`` en la primera petición de stream para
+        evitar consumir recursos antes de que el usuario abra el dashboard.
+        """
         if not self._started:
             self.reader.start()
             self.start()
 
     def get_latest(self) -> tuple[Optional[bytes], Optional[float]]:
+        """
+        Devuelve el último JPEG codificado y su timestamp epoch (thread-safe).
+
+        Returns:
+            ``(jpeg_bytes, epoch_float)`` o ``(None, None)`` si aún no hay frame.
+        """
         with self._stream_lock:
             return self._latest_jpeg, self._latest_ts
 
     def get_metrics(self) -> dict[str, Any]:
-        """Métricas de rendimiento en tiempo real (last ~30 inference frames)."""
+        """
+        Métricas de rendimiento en tiempo real (últimas ~30 inferencias).
+
+        Returns:
+            Dict con: ``fps_live``, ``fps_avg``, ``inference_ms_avg``,
+            ``inference_ms_max``, ``detections_total``, ``confidence_avg``,
+            ``camera_connected``, ``last_update``, ``active_tracks``.
+        """
         times = list(self._detection_times)
         ms_times = list(self._inference_ms_times)
 
@@ -425,6 +550,16 @@ class LiveVideoProcessor:
         }
 
     def mjpeg_generator(self) -> Any:
+        """
+        Generador HTTP de stream MJPEG (multipart/x-mixed-replace).
+
+        Llama a ``ensure_started()`` en la primera petición (lazy init).
+        Emite un frame placeholder negro mientras no hay RTSP disponible;
+        en cuanto hay frame real, lo emite y evita re-enviar el mismo timestamp.
+
+        Yields:
+            Bytes con boundary MIME + Content-Type + Content-Length + jpeg.
+        """
         self.ensure_started()
 
         h = int(self.deps.video_config.get("height", 720))
@@ -466,6 +601,16 @@ class LiveVideoProcessor:
             )
 
     def _save_evidence(self, frame: np.ndarray, detection_list: list[dict[str, Any]]) -> None:
+        """
+        Guarda el frame actual como imagen JPEG de evidencia en disco.
+
+        Política de guardado (evita saturar disco):
+        - Solo guarda si han pasado ``evidence_cooldown_s`` segundos desde la última vez.
+        - Solo guarda si la confianza >= ``evidence_min_confidence``.
+        - Durante una detección activa, solo reemplaza si hay mejora de confianza.
+        - Ruta: ``<detections_folder_rel>/evidence_<stamp>_conf<N>.jpg``.
+        - Actualiza ``image_path`` en los dicts de detección (para MetricsDBWriter).
+        """
         now = time.time()
         min_conf = float(clamp(float(STORAGE_CONFIG.get("evidence_min_confidence", 0.85)), 0.10, 1.00))
         cooldown_s = float(clamp(float(STORAGE_CONFIG.get("evidence_cooldown_s", 5.0)), 1.0, 60.0))
@@ -529,6 +674,15 @@ class LiveVideoProcessor:
         consecutive_hits: int,
         detection_list: list[dict[str, Any]],
     ) -> None:
+        """
+        Actualiza ``detection_state`` (dict compartido con Flask) bajo state_lock.
+
+        Tres estados posibles:
+        - Confirmado y con detecciones → ``status="Alerta: Dron detectado"``, detected=True.
+        - Sin confirmar pero con detecciones → ``status="Validando (X/N)"``, detected=False.
+        - Sin detecciones → ``status="Zona despejada"``, detected=False.
+        El frontend lee este dict vía SSE / polling en ``/api/live_metrics``.
+        """
         if self.state_lock is None or self.detection_state is None:
             return
 
@@ -545,7 +699,7 @@ class LiveVideoProcessor:
             elif detection_list and not confirmed:
                 avg_conf = float(np.mean([float(d["confidence"]) for d in detection_list]))
                 self.detection_state["status"] = (
-                    f"Validando detecciÃ³n ({int(consecutive_hits)}/{int(self.ui_persistence_frames)})"
+                    f"Validando detección ({int(consecutive_hits)}/{int(self.ui_persistence_frames)})"
                 )
                 self.detection_state["avg_confidence"] = avg_conf
                 self.detection_state["detected"] = False
@@ -557,6 +711,20 @@ class LiveVideoProcessor:
                 self.detection_state["detection_count"] = 0
 
     def _run(self) -> None:
+        """
+        Loop principal de inferencia del pipeline de video.
+
+        Por cada frame nuevo (ts != last_ts):
+        1. Comprueba reconexión RTSP → resetea SORTTracker si ``reconnect_count`` cambió.
+        2. Redimensiona frame al target (video_config width × height).
+        3. Cada ``inference_interval`` frames: ejecuta YOLO, NMS, SORTTracker.
+        4. DetectionPersistence.update() → confirmed / consecutive_hits.
+        5. Si confirmed: guarda evidencia (cooldown + min_conf).
+        6. Si hay inferencia: encola FrameRecord a MetricsDBWriter.
+        7. Si confirmed y hay detecciones: publica objetivo a PTZStateService (RO-04/05).
+        8. Actualiza detection_state (frontend) y anota FPS.
+        9. Codifica frame a JPEG y publica en ``_latest_jpeg`` bajo stream_lock.
+        """
         while not self._stop.is_set():
             # Detectar reconexión RTSP → resetear tracker para no propagar IDs obsoletos
             try:

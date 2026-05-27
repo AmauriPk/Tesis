@@ -1,11 +1,15 @@
 """
-Servicio para carga y gestión del modelo YOLO.
-
-Responsabilidades:
-  - Importación segura de PyTorch y YOLO
-  - Selección dinámica de device (GPU si disponible, CPU si no)
-  - Resolución de ruta del modelo con fallback
-  - Carga del modelo con manejo de errores
+Módulo      : yolo_model_service.py
+Rol         : Carga y gestión del modelo YOLO (Ultralytics) para detección de UAV.
+              Aísla la dependencia de PyTorch/CUDA del resto de la aplicación;
+              si torch o ultralytics no están disponibles, devuelve None de forma
+              controlada para que el sistema arranque en modo degradado.
+Conectado con: config.py (YOLO_CONFIG), ultralytics (YOLO), torch.
+Usado por   : app.py (llamada única en startup), src/routes/analysis.py (inferencia
+              en jobs manuales de imagen/video).
+Hilos       : Ninguno en este módulo — el modelo cargado es shared-readonly en hilos
+              de video_processor.py y analysis.py (YOLO es thread-safe en inferencia).
+Base de datos: No accede a ninguna DB.
 """
 import logging
 import os
