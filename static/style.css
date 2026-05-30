@@ -1274,3 +1274,167 @@ hr {
   padding:   .25rem .5rem !important;
 }
 .hist-filters .form-label { display: none !important; }
+
+/* ── Drop zone — estados ─────────────────────────────────────── */
+.drop-zone--error {
+  border-color: var(--state-alert) !important;
+  background:   var(--state-alert-bg) !important;
+}
+.drop-zone--error .drop-zone__icon i { color: var(--state-alert) !important; }
+.drop-zone--error .drop-zone__filename { color: var(--state-alert); }
+.drop-zone--ready {
+  border-color: var(--neon-dim) !important;
+  background:   var(--neon-faint) !important;
+}
+.drop-zone--ready .drop-zone__icon i { color: var(--neon) !important; }
+.drop-zone__preview {
+  max-height:   72px;
+  max-width:    100%;
+  object-fit:   contain;
+  margin:       .4rem auto 0;
+  display:      block;
+  border:       1px solid var(--bd-mid);
+}
+
+/* ════════════════════════════════════════════════════════════════
+   ADMIN — Layout y componentes
+   ════════════════════════════════════════════════════════════════ */
+
+.admin-nav-label {
+  font-family:    var(--ff-head) !important;
+  font-size:      .66rem;
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  color:          var(--state-off);
+  padding:        .18rem .55rem;
+  border:         1px solid var(--state-off-bd);
+  white-space:    nowrap;
+}
+
+/* Sub-navegación sticky debajo del navbar principal */
+.admin-subnav {
+  background:    rgba(4, 8, 12, .97);
+  border-bottom: 1px solid var(--bd-mid);
+  position:      sticky;
+  top:           52px;
+  z-index:       100;
+  overflow-x:    auto;
+}
+.admin-subnav .nav {
+  flex-wrap:  nowrap;
+  gap:        0;
+  padding:    0 .75rem;
+  max-width:  960px;
+  margin:     0 auto;
+}
+.admin-subnav .nav-link {
+  font-family:    var(--ff-mono) !important;
+  font-size:      .70rem !important;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color:          var(--mut2) !important;
+  padding:        .52rem 1rem !important;
+  border-radius:  0 !important;
+  border-bottom:  2px solid transparent;
+  white-space:    nowrap;
+  transition:     color .15s, border-color .15s;
+  background:     transparent !important;
+}
+.admin-subnav .nav-link:hover {
+  color:               var(--neon-dim) !important;
+  border-bottom-color: var(--bd-bright);
+}
+.admin-subnav .nav-link.active {
+  color:               var(--neon) !important;
+  border-bottom-color: var(--neon);
+  text-shadow:         0 0 6px var(--neon-glow);
+}
+
+/* Área de contenido admin — centrada y con max-width */
+.admin-content {
+  max-width: 960px;
+  margin:    0 auto;
+  padding:   1.5rem 1rem;
+}
+
+/* Fieldset con leyenda posicionada (sustituto de card) */
+.admin-fieldset {
+  background: var(--bg1);
+  border:     1px solid var(--bd-mid);
+  padding:    1.4rem 1.25rem 1.1rem;
+  margin-bottom: 1.25rem;
+  position:   relative;
+}
+.admin-fieldset::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    linear-gradient(var(--neon-pale), var(--neon-pale)) top    left  / 10px 1px no-repeat,
+    linear-gradient(var(--neon-pale), var(--neon-pale)) top    left  / 1px 10px no-repeat,
+    linear-gradient(var(--neon-pale), var(--neon-pale)) top    right / 10px 1px no-repeat,
+    linear-gradient(var(--neon-pale), var(--neon-pale)) top    right / 1px 10px no-repeat,
+    linear-gradient(var(--neon-pale), var(--neon-pale)) bottom left  / 10px 1px no-repeat,
+    linear-gradient(var(--neon-pale), var(--neon-pale)) bottom left  / 1px 10px no-repeat,
+    linear-gradient(var(--neon-pale), var(--neon-pale)) bottom right / 10px 1px no-repeat,
+    linear-gradient(var(--neon-pale), var(--neon-pale)) bottom right / 1px 10px no-repeat;
+}
+.admin-fieldset__legend {
+  position:     absolute;
+  top:          -.52rem;
+  left:         .85rem;
+  background:   var(--bg1);
+  padding:      0 .4rem;
+  font-family:  var(--ff-head) !important;
+  font-size:    .61rem;
+  text-transform: uppercase;
+  letter-spacing: .10em;
+  color:        var(--neon-dim);
+  z-index:      2;
+  white-space:  nowrap;
+}
+/* Lock overlay dentro de admin-fieldset */
+.admin-fieldset .lock-overlay { border-radius: 0; z-index: 10; }
+.admin-fieldset .lock-note    { color: var(--mut2) !important; font-size: .68rem !important; }
+
+/* Form hint unificado */
+.form-hint {
+  font-size:   .69rem !important;
+  color:       var(--mut2) !important;
+  line-height: 1.5;
+}
+
+/* Slider row admin */
+.admin-slider-row { margin-bottom: 1rem; }
+.admin-slider-row:last-of-type { margin-bottom: 0; }
+.admin-slider-header {
+  display:         flex;
+  justify-content: space-between;
+  align-items:     center;
+  margin-bottom:   .22rem;
+}
+.admin-slider-label { font-size: .74rem; color: var(--txt); }
+.admin-slider-value {
+  font-family: var(--ff-head) !important;
+  font-size:   .80rem;
+  color:       var(--neon);
+  text-shadow: 0 0 6px var(--neon-glow);
+  min-width:   3rem;
+  text-align:  right;
+}
+
+/* Indicador de estado de conexión actual */
+.admin-conn-pill {
+  display:     inline-flex;
+  align-items: center;
+  gap:         .4rem;
+  font-size:   .69rem;
+  padding:     .22rem .6rem;
+  border:      1px solid var(--bd);
+  background:  rgba(0,0,0,.3);
+  color:       var(--mut2);
+}
+.admin-conn-pill.connected { color: var(--neon); border-color: var(--state-clear-bd); }
+.admin-conn-pill.error     { color: var(--amber); border-color: var(--state-warn-bd); }

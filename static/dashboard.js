@@ -70,6 +70,27 @@
     else if (detected) generalCls = "status-danger";
     else generalCls = "status-ok";
     setStatus("sysGeneral", status, generalCls);
+
+    // Actualizar LED "En Vivo" del footer de video según estado real de conexión
+    const connLed = byId("camConnLed");
+    if (connLed) {
+      if (hasRtspErr) {
+        connLed.className = "status-led status-led--alert";
+        connLed.innerHTML = '<i class="fa-solid fa-circle"></i>Sin señal';
+      } else if (stale) {
+        connLed.className = "status-led status-led--warn";
+        connLed.innerHTML = '<i class="fa-solid fa-circle neon-blink"></i>Reconectando';
+      } else {
+        connLed.className = "status-led status-led--ok";
+        connLed.innerHTML = '<i class="fa-solid fa-circle neon-blink"></i>En Vivo';
+      }
+    }
+
+    // Actualizar label de cámara en footer
+    const camIdEl = byId("videoCamId");
+    if (camIdEl && cam.camera_type) {
+      camIdEl.textContent = cam.camera_type === "ptz" ? "CAM-PTZ" : "CAM-FIJA";
+    }
   };
 
   const fmtPct = (v) => {
@@ -432,6 +453,7 @@
     byId("resultVideo")?.classList.add("d-none");
     byId("topDetectionsSection")?.classList.add("d-none");
     byId("btnDownload")?.classList.add("d-none");
+    byId("offlineMetrics")?.classList.add("d-none");
     setText("mDet", "0");
     setText("mConf", "0%");
     setText("mFrames", "-");
@@ -462,6 +484,7 @@
     byId("resultVideo")?.classList.add("d-none");
     byId("topDetectionsSection")?.classList.add("d-none");
     byId("btnDownload")?.classList.add("d-none");
+    byId("offlineMetrics")?.classList.add("d-none");
     setText("mDet", "0");
     setText("mConf", "0%");
     setText("mFrames", "-");
@@ -552,11 +575,13 @@
               img.classList.remove("d-none");
             }
             byId("resultVideo")?.classList.add("d-none");
+            byId("resultEmpty")?.classList.add("d-none");
             if (btn) btn.classList.add("d-none");
             if (dlVideo) dlVideo.classList.add("d-none");
             setText("mDet", String(data.detections_count ?? 0));
             setText("mConf", fmtPct(data.avg_confidence ?? 0));
             setText("mFrames", "-");
+            byId("offlineMetrics")?.classList.remove("d-none");
             renderTopDetections([]);
           } else if (typ === "video") {
             console.log("[VIDEO_RESULT]", data);
@@ -635,9 +660,11 @@
               }
             }
             byId("resultImage")?.classList.add("d-none");
+            byId("resultEmpty")?.classList.add("d-none");
             setText("mDet", String(data.total_detections ?? 0));
             setText("mConf", fmtPct(data.avg_confidence ?? 0));
             setText("mFrames", String(data.frames_processed ?? "-"));
+            byId("offlineMetrics")?.classList.remove("d-none");
             renderTopDetections(data.top_detections || []);
           }
           return;
@@ -655,30 +682,58 @@
     const reset = byId("btnReset");
     if (!input || !reset) return;
 
-    const setFileReady = (file) => {
-      const btn = byId("btnAnalyze");
-      const lbl = byId("dropFilename");
-      const icon = document.querySelector("#dropZone .drop-zone__icon i");
-      if (btn) { btn.disabled = !file; btn.style.opacity = file ? "1" : "0.5"; }
+    let _isAnalyzing = false;
+    const VALID_EXT = /\.(jpe?g|png|mp4|avi|mov)$/i;
+
+    const fmtBytes = (b) =>
+      b < 1048576 ? (b / 1024).toFixed(1) + " KB" : (b / 1048576).toFixed(1) + " MB";
+
+    const setDropState = (state, msg) => {
+      const zone   = byId("dropZone");
+      const lbl    = byId("dropFilename");
+      const icon   = zone?.querySelector(".drop-zone__icon i");
+      const prev   = byId("dropPreview");
+      if (!zone) return;
+      zone.classList.remove("drag-over", "drop-zone--error", "drop-zone--ready");
+      if (state) zone.classList.add(state);
       if (lbl) {
-        if (file) { lbl.textContent = file.name; lbl.classList.remove("d-none"); }
-        else { lbl.classList.add("d-none"); }
+        if (msg) { lbl.textContent = msg; lbl.classList.remove("d-none"); }
+        else       lbl.classList.add("d-none");
       }
-      if (icon && file) icon.className = "fa-solid fa-file-circle-check";
+      if (state === "drop-zone--ready" && icon)   icon.className = "fa-solid fa-file-circle-check";
+      if (state === "drop-zone--error" && icon)   icon.className = "fa-solid fa-circle-exclamation";
+      if (!state && icon) {
+        icon.className = "fa-solid fa-cloud-arrow-up";
+        if (prev) prev.classList.add("d-none");
+      }
+    };
+
+    const showImagePreview = (file) => {
+      const prev = byId("dropPreview");
+      if (!prev) return;
+      if (/\.(jpe?g|png)$/i.test(file.name)) {
+        const reader = new FileReader();
+        reader.onload = (e) => { prev.src = e.target.result; prev.classList.remove("d-none"); };
+        reader.readAsDataURL(file);
+      } else {
+        prev.classList.add("d-none");
+      }
     };
 
     const startUpload = async () => {
-      if (!input.files || !input.files[0]) return;
+      if (_isAnalyzing || !input.files || !input.files[0]) return;
+      _isAnalyzing = true;
       clearResultsUi();
       byId("resultEmpty")?.classList.add("d-none");
       const fd = new FormData();
       fd.append("file", input.files[0]);
-      setBusy(true, "Procesando...");
+      setBusy(true, "Analizando...");
       showFlash("secondary", "Encolado");
       try {
         const res = await fetch("/upload_detect", { method: "POST", credentials: "same-origin", body: fd });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.success) {
+          _isAnalyzing = false;
           setBusy(false);
           showFlash("danger", data.error || data.message || "Error");
           return;
@@ -687,39 +742,69 @@
         await pollJob(String(data.job_id));
       } catch {
         setBusy(false);
-        showFlash("danger", "Error");
+        showFlash("danger", "Error de conexión");
+      } finally {
+        _isAnalyzing = false;
       }
     };
 
+    const processFile = (file) => {
+      if (!file) { setDropState(null); return; }
+
+      if (!VALID_EXT.test(file.name)) {
+        setDropState("drop-zone--error", `Formato no soportado: ${file.name}`);
+        showFlash("danger", "Usa .jpg, .png, .mp4 o .avi");
+        const btn = byId("btnAnalyze");
+        if (btn) { btn.disabled = true; btn.style.opacity = "0.5"; }
+        return;
+      }
+
+      if (_isAnalyzing) {
+        showFlash("secondary", "Análisis en progreso, espera que termine.");
+        return;
+      }
+
+      setDropState("drop-zone--ready", `${file.name} — ${fmtBytes(file.size)}`);
+      showImagePreview(file);
+      const btn = byId("btnAnalyze");
+      if (btn) { btn.disabled = false; btn.style.opacity = "1"; }
+
+      // Auto-análisis inmediato
+      startUpload();
+    };
+
     input.addEventListener("change", () => {
-      const file = input.files && input.files[0] ? input.files[0] : null;
-      setFileReady(file);
+      processFile(input.files?.[0] || null);
     });
 
-    byId("btnAnalyze")?.addEventListener("click", () => startUpload());
+    byId("btnAnalyze")?.addEventListener("click", () => {
+      if (!_isAnalyzing) startUpload();
+    });
 
     reset.addEventListener("click", () => {
+      _isAnalyzing = false;
       resetManualUi();
-      setFileReady(null);
+      setDropState(null);
       byId("resultEmpty")?.classList.remove("d-none");
-      const icon = document.querySelector("#dropZone .drop-zone__icon i");
-      if (icon) icon.className = "fa-solid fa-cloud-arrow-up";
+      input.value = "";
     });
 
     const dropZone = byId("dropZone");
     if (dropZone) {
-      dropZone.addEventListener("dragover", (e) => { e.preventDefault(); dropZone.classList.add("drag-over"); });
-      dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
+      dropZone.addEventListener("dragover",  (e) => { e.preventDefault(); dropZone.classList.add("drag-over"); });
+      dropZone.addEventListener("dragleave", ()  => dropZone.classList.remove("drag-over"));
       dropZone.addEventListener("drop", (e) => {
         e.preventDefault();
         dropZone.classList.remove("drag-over");
-        const files = e.dataTransfer?.files;
-        if (files && files[0]) {
-          const dt = new DataTransfer();
-          dt.items.add(files[0]);
-          input.files = dt.files;
-          setFileReady(files[0]);
+        const file = e.dataTransfer?.files?.[0] || null;
+        if (file) {
+          try {
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            input.files = dt.files;
+          } catch { /* Safari fallback — usa el file directo */ }
         }
+        processFile(file);
       });
     }
   };

@@ -301,6 +301,7 @@
                                 <div class="drop-zone__icon">
                                     <i class="fa-solid fa-cloud-arrow-up"></i>
                                 </div>
+                                <img id="dropPreview" class="drop-zone__preview d-none" alt="Preview" />
                                 <div class="drop-zone__text">
                                     <strong>Arrastra aquí</strong> o haz clic<br>
                                     .jpg &nbsp;.png &nbsp;.mp4 &nbsp;.avi
@@ -346,7 +347,7 @@
                             <div id="resultArea">
                                 <div class="result-empty" id="resultEmpty">
                                     <i class="fa-solid fa-image"></i>
-                                    <span>Carga un archivo y presiona Analizar</span>
+                                    <span>Arrastra o selecciona un archivo para analizar</span>
                                 </div>
                                 <img id="resultImage" class="video-frame d-none" alt="Resultado imagen" />
                                 <video id="resultVideo" class="video-frame d-none" controls>
@@ -372,8 +373,8 @@
                         </div>
                     </div>
 
-                    {# KPI métricas #}
-                    <div class="row g-2 mt-2">
+                    {# KPI métricas — se muestran solo al terminar el análisis #}
+                    <div class="row g-2 mt-2 d-none" id="offlineMetrics">
                         <div class="col-4">
                             <div class="metric-card">
                                 <div class="metric-card__label">Detecciones</div>
