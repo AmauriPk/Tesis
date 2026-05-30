@@ -597,18 +597,29 @@
             if (el) el.classList.add('d-none');
         }
 
+        function safeJson(r, errId) {
+            if (!r.ok) {
+                throw new Error('HTTP ' + r.status + ' — acceso denegado o ruta no encontrada');
+            }
+            var ct = r.headers.get('content-type') || '';
+            if (!ct.includes('application/json')) {
+                throw new Error('La API devolvió HTML en lugar de JSON (HTTP ' + r.status + ')');
+            }
+            return r.json();
+        }
+
         function loadLiveMetrics() {
             fetch(LIVE_URL, { credentials: 'same-origin' })
-                .then(function (r) { return r.json(); })
+                .then(function (r) { return safeJson(r, 'metricsLiveErr'); })
                 .then(function (d) {
                     if (d.error) { showErr('metricsLiveErr', d.error); return; }
                     hideErr('metricsLiveErr');
-                    setText('mFpsLive',    d.fps_live.toFixed(1));
-                    setText('mFpsAvg',     d.fps_avg.toFixed(1));
-                    setText('mInfAvg',     d.inference_ms_avg.toFixed(1));
-                    setText('mInfMax',     d.inference_ms_max.toFixed(1));
-                    setText('mDets',       d.detections_total);
-                    setText('mConf',       (d.confidence_avg * 100).toFixed(1) + '%');
+                    setText('mFpsLive',    d.fps_live != null    ? d.fps_live.toFixed(1)          : '—');
+                    setText('mFpsAvg',     d.fps_avg != null     ? d.fps_avg.toFixed(1)           : '—');
+                    setText('mInfAvg',     d.inference_ms_avg != null ? d.inference_ms_avg.toFixed(1) : '—');
+                    setText('mInfMax',     d.inference_ms_max != null ? d.inference_ms_max.toFixed(1) : '—');
+                    setText('mDets',       d.detections_total != null ? d.detections_total         : '—');
+                    setText('mConf',       d.confidence_avg   != null ? (d.confidence_avg * 100).toFixed(1) + '%' : '—');
                     setText('mCam',        d.camera_connected ? 'Conectada' : 'Sin señal');
                     var ts = d.last_update ? d.last_update.replace('T', ' ').slice(0, 19) : '—';
                     setText('mLastUpdate', 'Actualizado: ' + ts);
@@ -631,22 +642,22 @@
                         }
                     }
                 })
-                .catch(function (e) { showErr('metricsLiveErr', 'Error: ' + e.message); });
+                .catch(function (e) { showErr('metricsLiveErr', e.message); });
         }
 
         function loadHistoricalMetrics() {
             fetch(HIST_URL, { credentials: 'same-origin' })
-                .then(function (r) { return r.json(); })
+                .then(function (r) { return safeJson(r, 'metricsHistErr'); })
                 .then(function (d) {
                     if (d.error) { showErr('metricsHistErr', d.error); return; }
                     hideErr('metricsHistErr');
                     setText('hSamples',   d.sample_count);
-                    setText('hInfAvg',    d.inference_ms_avg.toFixed(1));
-                    setText('hInfP95',    d.inference_ms_p95.toFixed(1));
-                    setText('hDetRate',   (d.detection_rate * 100).toFixed(1) + '%');
-                    setText('hConfirmed', d.confirmed_count);
+                    setText('hInfAvg',    d.inference_ms_avg != null ? d.inference_ms_avg.toFixed(1) : '—');
+                    setText('hInfP95',    d.inference_ms_p95 != null ? d.inference_ms_p95.toFixed(1) : '—');
+                    setText('hDetRate',   d.detection_rate   != null ? (d.detection_rate * 100).toFixed(1) + '%' : '—');
+                    setText('hConfirmed', d.confirmed_count != null ? d.confirmed_count : '—');
                 })
-                .catch(function (e) { showErr('metricsHistErr', 'Error: ' + e.message); });
+                .catch(function (e) { showErr('metricsHistErr', e.message); });
         }
 
         function startPolling() {

@@ -107,7 +107,7 @@ def init_dashboard_routes(**deps: Any) -> None:
 
     @dashboard_bp.get("/api/live_metrics", endpoint="live_metrics")
     @login_required
-    @role_required("operator")
+    @role_required("operator", "admin")
     def live_metrics():
         """Métricas en tiempo real del procesador de video."""
         processor = get_live_processor()
@@ -125,7 +125,7 @@ def init_dashboard_routes(**deps: Any) -> None:
 
     @dashboard_bp.get("/api/historical_metrics", endpoint="historical_metrics")
     @login_required
-    @role_required("operator")
+    @role_required("operator", "admin")
     def historical_metrics():
         """Agrega las últimas 100 filas de inference_frames para métricas históricas."""
         db_path = str(STORAGE_CONFIG.get("db_path", "detections.db"))
