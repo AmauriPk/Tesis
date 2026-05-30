@@ -120,6 +120,12 @@
     }
 
     renderSystemPanel();
+
+    if (detected) {
+      applyAlertState(fmtPct(conf), last);
+    } else {
+      applyClearState();
+    }
   };
 
   let alertsViewMode = "events"; // events | raw
@@ -145,40 +151,43 @@
 
     const items = events || [];
     if (!items.length) {
-      body.innerHTML = `<tr><td colspan="7" class="text-secondary">Sin alertas.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="5" class="text-secondary text-center py-2">Sin alertas.</td></tr>`;
       return;
     }
 
     for (const ev of items) {
       const tr = document.createElement("tr");
-      const id = ev.id ?? "-";
-      const started = ev.started_at || "-";
-      const ended = ev.ended_at || "-";
       const conf = Number(ev.max_confidence || 0);
-      const count = Number(ev.detection_count || 0);
-      const bbox = ev.best_bbox || "-";
-
       const imgUrl = ev.best_evidence_url ? String(ev.best_evidence_url) : "";
       const thumb = imgUrl
-        ? `<img src="${imgUrl}" alt="evidencia" style="max-width:80px;max-height:60px;object-fit:cover;border-radius:6px" />`
-        : `<span class="text-secondary">-</span>`;
+        ? `<img src="${imgUrl}" class="evidence-thumb" alt="ev" data-img-url="${imgUrl}" data-conf="${conf}" />`
+        : `<span class="text-secondary" style="font-size:.65rem">—</span>`;
       const btn = imgUrl
-        ? `<button class="btn btn-sm btn-outline-warning ms-2" data-img-url="${imgUrl}" data-conf="${conf}">Ver</button>`
+        ? `<button class="btn btn-sm btn-outline-warning" data-img-url="${imgUrl}" data-conf="${conf}" style="font-size:.62rem;padding:.1rem .35rem;">Ver</button>`
         : ``;
 
       tr.innerHTML = `
-        <td class="mono">${id}</td>
-        <td class="mono">${started}</td>
-        <td class="mono">${ended}</td>
+        <td class="mono">${ev.id ?? "—"}</td>
+        <td class="mono">${ev.started_at || "—"}</td>
         <td class="mono">${fmtPct(conf)}</td>
-        <td class="mono">${count}</td>
-        <td class="mono">${bbox}</td>
-        <td>${thumb}${btn}</td>
+        <td>${thumb}</td>
+        <td>${btn}</td>
       `;
       body.appendChild(tr);
     }
 
     bindEvidenceButtons(body);
+    body.querySelectorAll(".evidence-thumb").forEach((img) => {
+      img.addEventListener("click", () => {
+        const modalEl = byId("evidenceModal");
+        const imgEl = byId("evidenceImage");
+        if (!imgEl || !modalEl) return;
+        imgEl.src = String(img.dataset.imgUrl || "");
+        const meta = byId("evidenceMeta");
+        if (meta) meta.textContent = `Confianza: ${fmtPct(img.dataset.conf)}`;
+        if (window.bootstrap?.Modal) new window.bootstrap.Modal(modalEl).show();
+      });
+    });
   };
 
   const renderRawAlerts = (alerts) => {
@@ -188,42 +197,30 @@
 
     const items = alerts || [];
     if (!items.length) {
-      body.innerHTML = `<tr><td colspan="7" class="text-secondary">Sin alertas.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="5" class="text-secondary text-center py-2">Sin alertas.</td></tr>`;
       return;
     }
 
     for (const a of items) {
       const tr = document.createElement("tr");
-      const id = a.id ?? "-";
-      const started = a.timestamp || a.timestamp_iso || "-";
-      const ended = "-";
       const conf = Number(a.confidence || 0);
-      const count = "-";
-      const bbox = a.bbox_text
-        ? String(a.bbox_text)
-        : Array.isArray(a.bbox) && a.bbox.every((x) => x !== undefined && x !== null)
-          ? `${a.bbox[0]},${a.bbox[1]},${a.bbox[2]},${a.bbox[3]}`
-          : "-";
-
       const imgUrl =
         a.evidence_url ||
         a.image_url ||
         (a.image_path ? `/${String(a.image_path).replaceAll("\\", "/")}` : "");
       const thumb = imgUrl
-        ? `<img src="${imgUrl}" alt="evidencia" style="max-width:80px;max-height:60px;object-fit:cover;border-radius:6px" />`
-        : `<span class="text-secondary">-</span>`;
+        ? `<img src="${imgUrl}" class="evidence-thumb" alt="ev" data-img-url="${imgUrl}" data-conf="${conf}" />`
+        : `<span class="text-secondary" style="font-size:.65rem">—</span>`;
       const btn = imgUrl
-        ? `<button class="btn btn-sm btn-outline-warning ms-2" data-img-url="${imgUrl}" data-conf="${conf}">Ver</button>`
+        ? `<button class="btn btn-sm btn-outline-warning" data-img-url="${imgUrl}" data-conf="${conf}" style="font-size:.62rem;padding:.1rem .35rem;">Ver</button>`
         : ``;
 
       tr.innerHTML = `
-        <td class="mono">${id}</td>
-        <td class="mono">${started}</td>
-        <td class="mono">${ended}</td>
+        <td class="mono">${a.id ?? "—"}</td>
+        <td class="mono">${a.timestamp || a.timestamp_iso || "—"}</td>
         <td class="mono">${fmtPct(conf)}</td>
-        <td class="mono">${count}</td>
-        <td class="mono">${bbox}</td>
-        <td>${thumb}${btn}</td>
+        <td>${thumb}</td>
+        <td>${btn}</td>
       `;
       body.appendChild(tr);
     }
@@ -257,7 +254,12 @@
     const hw = byId("hwBadge");
     if (hw) hw.textContent = `Cámara Detectada: ${mode}`;
     const panel = byId("ptzPanel");
-    if (panel) panel.style.display = isPtz ? "" : "none";
+    if (panel) panel.classList.toggle("ptz-unavailable", !isPtz);
+    const hwBadge = byId("hwBadge");
+    if (hwBadge) {
+      hwBadge.className = isPtz ? "status-led status-led--ok" : "status-led status-led--warn";
+      hwBadge.innerHTML = `<i class="fa-solid fa-circle${isPtz ? " neon-blink" : ""}"></i>${mode.toUpperCase()}`;
+    }
     renderSystemPanel();
   };
 
@@ -269,11 +271,16 @@
     const maxConf = Number(data.max_confidence || 0);
 
     const elEvents = byId("summaryEvents");
-    if (elEvents) elEvents.textContent = `Eventos: ${totalEvents} (abiertos: ${openEvents})`;
+    if (elEvents) elEvents.textContent = `${totalEvents} (ab: ${openEvents})`;
     const elEv = byId("summaryEvidence");
-    if (elEv) elEv.textContent = `Con evidencia: ${withEv}`;
+    if (elEv) elEv.textContent = String(withEv);
     const elMax = byId("summaryMaxConf");
-    if (elMax) elMax.textContent = `Conf máx: ${fmtPct(maxConf)}`;
+    if (elMax) elMax.textContent = fmtPct(maxConf);
+
+    setText("histTotalEvents", String(totalEvents));
+    setText("histOpenEvents", String(openEvents));
+    setText("histWithEvidence", String(withEv));
+    setText("histMaxConf", fmtPct(maxConf));
   };
 
   const postJson = (url, payload) =>
@@ -407,7 +414,7 @@
         .catch(() => null);
     }
   };
-
+ 
   let activeJob = null;
   const setBusy = (busy, msg) => {
     const wrap = byId("globalProgressWrap");
@@ -648,14 +655,24 @@
     const reset = byId("btnReset");
     if (!input || !reset) return;
 
+    const setFileReady = (file) => {
+      const btn = byId("btnAnalyze");
+      const lbl = byId("dropFilename");
+      const icon = document.querySelector("#dropZone .drop-zone__icon i");
+      if (btn) { btn.disabled = !file; btn.style.opacity = file ? "1" : "0.5"; }
+      if (lbl) {
+        if (file) { lbl.textContent = file.name; lbl.classList.remove("d-none"); }
+        else { lbl.classList.add("d-none"); }
+      }
+      if (icon && file) icon.className = "fa-solid fa-file-circle-check";
+    };
+
     const startUpload = async () => {
       if (!input.files || !input.files[0]) return;
-
       clearResultsUi();
-
+      byId("resultEmpty")?.classList.add("d-none");
       const fd = new FormData();
       fd.append("file", input.files[0]);
-
       setBusy(true, "Procesando...");
       showFlash("secondary", "Encolado");
       try {
@@ -675,11 +692,188 @@
     };
 
     input.addEventListener("change", () => {
-      const has = input.files && input.files.length > 0;
-      if (has) startUpload();
+      const file = input.files && input.files[0] ? input.files[0] : null;
+      setFileReady(file);
     });
 
-    reset.addEventListener("click", () => resetManualUi());
+    byId("btnAnalyze")?.addEventListener("click", () => startUpload());
+
+    reset.addEventListener("click", () => {
+      resetManualUi();
+      setFileReady(null);
+      byId("resultEmpty")?.classList.remove("d-none");
+      const icon = document.querySelector("#dropZone .drop-zone__icon i");
+      if (icon) icon.className = "fa-solid fa-cloud-arrow-up";
+    });
+
+    const dropZone = byId("dropZone");
+    if (dropZone) {
+      dropZone.addEventListener("dragover", (e) => { e.preventDefault(); dropZone.classList.add("drag-over"); });
+      dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
+      dropZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("drag-over");
+        const files = e.dataTransfer?.files;
+        if (files && files[0]) {
+          const dt = new DataTransfer();
+          dt.items.add(files[0]);
+          input.files = dt.files;
+          setFileReady(files[0]);
+        }
+      });
+    }
+  };
+
+  // ── Estado de alerta — nuevo diseño ─────────────────────────
+  let _lastDetected = false;
+  let _alertToastTimer = null;
+
+  const applyAlertState = (confStr, timeStr) => {
+    const strip = byId("alertStrip");
+    const icon  = byId("alertIcon");
+    const state = byId("alertState");
+    if (strip) {
+      strip.className = "alert-panel alert-panel--alert";
+    }
+    if (icon)  icon.className  = "fa-solid fa-triangle-exclamation fa-beat-fade";
+    if (state) state.textContent = "RPAS DETECTADO";
+    document.body.classList.add("body--alert");
+    if (!_lastDetected) {
+      showAlertToast(confStr, timeStr);
+    }
+    _lastDetected = true;
+  };
+
+  const applyClearState = () => {
+    const strip = byId("alertStrip");
+    const icon  = byId("alertIcon");
+    const state = byId("alertState");
+    if (strip) strip.className = "alert-panel alert-panel--clear";
+    if (icon)  icon.className  = "fa-solid fa-shield-halved";
+    if (state) state.textContent = "ZONA DESPEJADA";
+    document.body.classList.remove("body--alert");
+    _lastDetected = false;
+  };
+
+  const showAlertToast = (confStr, timeStr) => {
+    const toast = byId("siranAlertToast");
+    if (!toast) return;
+    const confEl = byId("toastConf");
+    const timeEl = byId("toastTime");
+    if (confEl) confEl.textContent = confStr || "—";
+    if (timeEl) timeEl.textContent = timeStr || "—";
+    toast.classList.add("visible");
+    if (_alertToastTimer) clearTimeout(_alertToastTimer);
+    _alertToastTimer = setTimeout(() => toast.classList.remove("visible"), 7000);
+  };
+
+  // ── Historial ────────────────────────────────────────────────
+  let historialData = [];
+
+  const showHistDetail = (ev) => {
+    const panel = byId("histDetailBody");
+    if (!panel || !ev) return;
+    const conf = Number(ev.max_confidence || 0);
+    const imgUrl = ev.best_evidence_url || "";
+    panel.innerHTML = `
+      <div class="sys-status-list mb-3">
+        <div class="sys-row"><span class="sys-label">ID</span><span class="mono">${ev.id ?? "—"}</span></div>
+        <div class="sys-row"><span class="sys-label">Inicio</span><span class="mono" style="font-size:.67rem">${ev.started_at || "—"}</span></div>
+        <div class="sys-row"><span class="sys-label">Fin</span><span class="mono" style="font-size:.67rem">${ev.ended_at || "—"}</span></div>
+        <div class="sys-row"><span class="sys-label">Conf. máx.</span><span class="mono">${fmtPct(conf)}</span></div>
+        <div class="sys-row"><span class="sys-label">Detecciones</span><span class="mono">${ev.detection_count ?? "—"}</span></div>
+        <div class="sys-row"><span class="sys-label">BBox</span><span class="mono" style="font-size:.62rem;word-break:break-all;">${ev.best_bbox || "—"}</span></div>
+      </div>
+      ${imgUrl
+        ? `<img src="${imgUrl}" class="img-fluid mt-1" style="border:1px solid var(--bd-mid);max-height:220px;object-fit:contain;display:block;" alt="Evidencia" />`
+        : `<div class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;">Sin evidencia</div>`
+      }
+    `;
+  };
+
+  const renderHistorialTable = (events) => {
+    const body = byId("histTableBody");
+    if (!body) return;
+
+    const search  = (byId("histSearch")?.value || "").toLowerCase().trim();
+    const evFilt  = byId("histFilterEvidence")?.value || "";
+    const confMin = Number(byId("histFilterConf")?.value || 0);
+
+    const filtered = (events || []).filter((ev) => {
+      if (search && !String(ev.id ?? "").includes(search)) return false;
+      if (evFilt === "yes" && !ev.best_evidence_url) return false;
+      if (evFilt === "no"  &&  ev.best_evidence_url) return false;
+      if (confMin > 0 && Number(ev.max_confidence || 0) * 100 < confMin) return false;
+      return true;
+    });
+
+    body.innerHTML = "";
+    if (!filtered.length) {
+      body.innerHTML = `<tr><td colspan="6" class="text-secondary text-center py-3">Sin eventos.</td></tr>`;
+      return;
+    }
+
+    for (const ev of filtered) {
+      const tr = document.createElement("tr");
+      const conf = Number(ev.max_confidence || 0);
+      const imgUrl = ev.best_evidence_url ? String(ev.best_evidence_url) : "";
+      const thumb = imgUrl
+        ? `<img src="${imgUrl}" class="evidence-thumb" alt="ev" data-img-url="${imgUrl}" data-conf="${conf}" />`
+        : `<span class="text-secondary" style="font-size:.65rem">—</span>`;
+
+      tr.innerHTML = `
+        <td class="mono">${ev.id ?? "—"}</td>
+        <td class="mono" style="font-size:.67rem">${ev.started_at || "—"}</td>
+        <td class="mono">${fmtPct(conf)}</td>
+        <td class="mono">${ev.detection_count ?? "—"}</td>
+        <td>${thumb}</td>
+        <td>
+          <button class="btn btn-sm btn-outline-warning"
+                  data-hist-id="${ev.id}"
+                  style="font-size:.6rem;padding:.1rem .35rem;">VER</button>
+        </td>
+      `;
+      body.appendChild(tr);
+    }
+
+    body.querySelectorAll("[data-hist-id]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const ev = (events || []).find((e) => String(e.id) === String(btn.dataset.histId));
+        showHistDetail(ev);
+      });
+    });
+    body.querySelectorAll(".evidence-thumb").forEach((img) => {
+      img.addEventListener("click", () => {
+        const modalEl = byId("evidenceModal");
+        const imgEl   = byId("evidenceImage");
+        if (!imgEl || !modalEl) return;
+        imgEl.src = String(img.dataset.imgUrl || "");
+        const meta = byId("evidenceMeta");
+        if (meta) meta.textContent = `Confianza: ${fmtPct(img.dataset.conf)}`;
+        if (window.bootstrap?.Modal) new window.bootstrap.Modal(modalEl).show();
+      });
+    });
+  };
+
+  const loadHistorial = async () => {
+    const body = byId("histTableBody");
+    if (body) body.innerHTML = `<tr><td colspan="6" class="text-secondary text-center py-3">Cargando...</td></tr>`;
+    const data = await fetchJson("/api/recent_detection_events?limit=100");
+    historialData = data.events || [];
+    renderHistorialTable(historialData);
+  };
+
+  // ── Timestamp en footer del video ────────────────────────────
+  const startLiveTimestamp = () => {
+    setInterval(() => {
+      const el = byId("liveTimestamp");
+      if (!el) return;
+      const d = new Date();
+      el.textContent =
+        String(d.getHours()).padStart(2, "0") + ":" +
+        String(d.getMinutes()).padStart(2, "0") + ":" +
+        String(d.getSeconds()).padStart(2, "0");
+    }, 1000);
   };
 
   const boot = async () => {
@@ -693,6 +887,26 @@
     });
     bindPtz();
     bindManual();
+    startLiveTimestamp();
+
+    // Historial tab — cargar al activar
+    document.querySelectorAll('[data-bs-target="#historial"]').forEach((btn) => {
+      btn.addEventListener("shown.bs.tab", () => {
+        updateDetectionSummary().catch(() => null);
+        loadHistorial().catch(() => null);
+      });
+    });
+    // Si historial ya está activo al cargar la página
+    if (document.getElementById("historial")?.classList.contains("active")) {
+      loadHistorial().catch(() => null);
+    }
+
+    // Filtros del historial
+    ["histSearch", "histFilterEvidence", "histFilterConf"].forEach((id) => {
+      byId(id)?.addEventListener("input",  () => renderHistorialTable(historialData));
+      byId(id)?.addEventListener("change", () => renderHistorialTable(historialData));
+    });
+    byId("histBtnRefresh")?.addEventListener("click", () => loadHistorial().catch(() => null));
 
     await Promise.allSettled([updateStatus(), updateAlerts(), updateCameraUi(), updateDetectionSummary(), updateAutomationUi()]);
     setInterval(() => updateStatus().catch(() => null), 2000);

@@ -12,22 +12,63 @@
 </head>
 <body>
     <nav class="navbar navbar-expand-lg sticky-top">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="#">
+        <div class="container-fluid gap-2">
+
+            <!-- Brand -->
+            <a class="navbar-brand flex-shrink-0" href="{{ url_for('dashboard.operador') }}">
                 <img src="{{ url_for('static', filename='vendor/siran_isotipo.svg') }}"
                      alt="SIRAN"
-                     style="height:40px; width:auto; filter: drop-shadow(0 0 6px #00ff41); border:none; background:transparent;">
+                     style="height:32px;width:auto;filter:drop-shadow(0 0 6px #00ff41);border:none;background:transparent;">
             </a>
-            <div class="ms-auto d-flex align-items-center gap-2">
+
+            <!-- Módulos de navegación (inyectados por cada template) -->
+            {% block navbar_center %}{% endblock %}
+
+            <!-- Derecha: clock + acciones + salir -->
+            <div class="d-flex align-items-center gap-2 ms-auto">
+                <span class="nav-clock d-none d-md-inline" id="navClock">--:--:--</span>
                 {% block navbar_actions %}{% endblock %}
                 <a class="btn btn-sm btn-outline-light" href="{{ url_for('auth.logout') }}">
-                    <i class="fa-solid fa-right-from-bracket me-1"></i>Salir
+                    <i class="fa-solid fa-right-from-bracket"></i>
+                    <span class="d-none d-sm-inline ms-1">Salir</span>
                 </a>
             </div>
         </div>
     </nav>
+
+    <!-- Toast de alerta RPAS (global) -->
+    <div class="siran-toast" id="siranAlertToast" role="alert" aria-live="assertive">
+        <div class="siran-toast__icon">
+            <i class="fa-solid fa-triangle-exclamation neon-blink"></i>
+        </div>
+        <div>
+            <div class="siran-toast__title">RPAS Detectado</div>
+            <div class="siran-toast__meta">
+                Conf: <span id="toastConf">—</span>&nbsp;&middot;&nbsp;<span id="toastTime">—</span>
+            </div>
+        </div>
+    </div>
+
     {% block content %}{% endblock %}
+
     <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
     {% block extra_scripts %}{% endblock %}
+
+    <!-- Clock global -->
+    <script>
+    (function () {
+        function tick() {
+            var el = document.getElementById('navClock');
+            if (!el) return;
+            var d = new Date();
+            el.textContent =
+                String(d.getHours()).padStart(2,'0') + ':' +
+                String(d.getMinutes()).padStart(2,'0') + ':' +
+                String(d.getSeconds()).padStart(2,'0');
+        }
+        tick();
+        setInterval(tick, 1000);
+    }());
+    </script>
 </body>
 </html>

@@ -75,7 +75,7 @@ def init_dashboard_routes(**deps: Any) -> None:
         is_ptz = bool(leer_config_camara())
         camera_type_str = "ptz" if is_ptz else "fixed"
         active_tab = (request.args.get("tab") or "").strip().lower() or "live"
-        if active_tab not in {"live", "manual"}:
+        if active_tab not in {"live", "manual", "historial"}:
             active_tab = "live"
         return render_template(
             "operador.html",
