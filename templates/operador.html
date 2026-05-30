@@ -7,24 +7,21 @@
 <div class="d-none d-lg-flex align-items-end gap-0 ms-3" style="height:100%;align-self:stretch;">
     <button type="button"
             class="nav-module-link {% if active_tab == 'live' %}active{% endif %}"
-            data-bs-toggle="tab" data-bs-target="#live"
-            role="tab" aria-controls="live"
+            data-nav-target="#live"
             aria-selected="{{ 'true' if active_tab == 'live' else 'false' }}"
             id="navBtnLive">
         <i class="fa-solid fa-satellite-dish me-1"></i>Operación
     </button>
     <button type="button"
             class="nav-module-link {% if active_tab == 'manual' %}active{% endif %}"
-            data-bs-toggle="tab" data-bs-target="#manual"
-            role="tab" aria-controls="manual"
+            data-nav-target="#manual"
             aria-selected="{{ 'true' if active_tab == 'manual' else 'false' }}"
             id="navBtnManual">
         <i class="fa-solid fa-upload me-1"></i>Análisis
     </button>
     <button type="button"
             class="nav-module-link {% if active_tab == 'historial' %}active{% endif %}"
-            data-bs-toggle="tab" data-bs-target="#historial"
-            role="tab" aria-controls="historial"
+            data-nav-target="#historial"
             aria-selected="{{ 'true' if active_tab == 'historial' else 'false' }}"
             id="navBtnHistorial">
         <i class="fa-solid fa-clock-rotate-left me-1"></i>Historial

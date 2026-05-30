@@ -863,6 +863,75 @@
     renderHistorialTable(historialData);
   };
 
+  // ── Navegación de módulos (navbar → tabs) ────────────────────
+  //
+  // Los botones del navbar NO usan data-bs-toggle="tab" porque Bootstrap
+  // necesita un [role="tablist"] padre para desactivar el tab anterior.
+  // Sin ese padre, Bootstrap activa el nuevo pane pero no desactiva el
+  // viejo — ambos quedan show/active y el primero (live) tapa al segundo.
+  //
+  // Solución: delegamos el cambio real a los triggers del nav móvil, que
+  // SÍ están dentro de un ul.nav-tabs[role="tablist"].
+  //
+  const initNavModuleTabs = () => {
+    const navBtns = document.querySelectorAll(".nav-module-link[data-nav-target]");
+
+    const syncNavActive = (target) => {
+      navBtns.forEach((b) => {
+        const isActive = b.getAttribute("data-nav-target") === target;
+        b.classList.toggle("active", isActive);
+        b.setAttribute("aria-selected", isActive ? "true" : "false");
+      });
+    };
+
+    navBtns.forEach((navBtn) => {
+      navBtn.addEventListener("click", () => {
+        const target = navBtn.getAttribute("data-nav-target");
+        if (!target) return;
+
+        // Buscar el trigger móvil que SÍ está en un tablist válido
+        const mobileTrigger = document.querySelector(
+          `.nav-tabs .nav-link[data-bs-target="${target}"]`
+        );
+
+        if (mobileTrigger && window.bootstrap?.Tab) {
+          window.bootstrap.Tab.getOrCreateInstance(mobileTrigger).show();
+        } else {
+          // Fallback manual (por si Bootstrap no cargó aún)
+          document.querySelectorAll(".tab-pane").forEach((p) => {
+            p.classList.remove("show", "active");
+          });
+          document.querySelector(target)?.classList.add("show", "active");
+          // Sincronizar tabs móviles también
+          document.querySelectorAll(".nav-tabs .nav-link").forEach((ml) => {
+            ml.classList.toggle("active", ml.getAttribute("data-bs-target") === target);
+          });
+        }
+
+        syncNavActive(target);
+      });
+    });
+
+    // Mantener navbar sincronizado cuando cambia desde tabs móviles
+    // o cuando Bootstrap activa el tab por cualquier otro medio
+    document.addEventListener("shown.bs.tab", (e) => {
+      const target =
+        e.target.getAttribute("data-bs-target") || e.target.getAttribute("href");
+      if (target) syncNavActive(target);
+
+      // Cargar historial al activar esa pestaña
+      if (target === "#historial") {
+        updateDetectionSummary().catch(() => null);
+        loadHistorial().catch(() => null);
+      }
+    });
+
+    // Si historial ya está activo en la carga inicial (URL ?tab=historial)
+    if (document.getElementById("historial")?.classList.contains("active")) {
+      loadHistorial().catch(() => null);
+    }
+  };
+
   // ── Timestamp en footer del video ────────────────────────────
   const startLiveTimestamp = () => {
     setInterval(() => {
@@ -888,18 +957,7 @@
     bindPtz();
     bindManual();
     startLiveTimestamp();
-
-    // Historial tab — cargar al activar
-    document.querySelectorAll('[data-bs-target="#historial"]').forEach((btn) => {
-      btn.addEventListener("shown.bs.tab", () => {
-        updateDetectionSummary().catch(() => null);
-        loadHistorial().catch(() => null);
-      });
-    });
-    // Si historial ya está activo al cargar la página
-    if (document.getElementById("historial")?.classList.contains("active")) {
-      loadHistorial().catch(() => null);
-    }
+    initNavModuleTabs();
 
     // Filtros del historial
     ["histSearch", "histFilterEvidence", "histFilterConf"].forEach((id) => {
