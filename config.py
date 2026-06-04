@@ -51,18 +51,18 @@ YOLO_CONFIG = {
 PTZ_CONFIG = {
     # Tracking — cuándo y con qué velocidad mover la cámara
     "target_ttl":       _env_float("PTZ_TRACKING_TARGET_TTL",       3.0),   # RO-04: T=3 s
-    "command_interval": _env_float("PTZ_TRACKING_COMMAND_INTERVAL", 0.35),
-    "max_speed":        _env_float("PTZ_TRACKING_MAX_SPEED",        0.50),
-    "min_speed":        _env_float("PTZ_TRACKING_MIN_SPEED",        0.12),
+    "command_interval": _env_float("PTZ_TRACKING_COMMAND_INTERVAL", 0.08),
+    "max_speed":        _env_float("PTZ_TRACKING_MAX_SPEED",        0.90),
+    "min_speed":        _env_float("PTZ_TRACKING_MIN_SPEED",        0.30),
     "pan_duration":     _env_float("PTZ_TRACKING_PAN_DURATION",     0.30),
-    "tilt_duration":    _env_float("PTZ_TRACKING_TILT_DURATION",    0.55),
-    "pan_speed":        _env_float("PTZ_TRACKING_PAN_SPEED",        0.35),
-    "tilt_speed":       _env_float("PTZ_TRACKING_TILT_SPEED",       0.45),
-    "tolerance":        _env_float("PTZ_TRACKING_TOLERANCE",        0.15),  # RO-03: zona central 30% = ±15%
+    "tilt_duration":    _env_float("PTZ_TRACKING_TILT_DURATION",    0.30),
+    "pan_speed":        _env_float("PTZ_TRACKING_PAN_SPEED",        0.50),
+    "tilt_speed":       _env_float("PTZ_TRACKING_TILT_SPEED",       0.50),
+    "tolerance":        _env_float("PTZ_TRACKING_TOLERANCE",        0.08),  # RO-03: zona central 8% = ±4%
     "edge_tilt_boost":  _env_float("PTZ_TRACKING_EDGE_TILT_BOOST",  1.4),
     # Proporcionalidad (RO-05): pan_cmd = k_pan * error_x, tilt_cmd = -k_tilt * error_y
-    "k_pan":            _env_float("PTZ_K_PAN",                     0.8),
-    "k_tilt":           _env_float("PTZ_K_TILT",                    0.8),
+    "k_pan":            _env_float("PTZ_K_PAN",                     1.60),
+    "k_tilt":           _env_float("PTZ_K_TILT",                    1.40),
     # Inspección / patrullaje automático
     "inspection_idle_s":   _env_float("PTZ_INSPECTION_IDLE_S",        10.0),
     "continuous_360":      _env_bool("PTZ_INSPECTION_CONTINUOUS_360",  False),
@@ -81,6 +81,12 @@ PTZ_CONFIG = {
     "reacq_speed":      _env_float("PTZ_REACQ_SPEED",    0.20),   # velocidad suave
     "reacq_pulse_s":    _env_float("PTZ_REACQ_PULSE_S",  0.40),   # duración de cada pulso
     "reacq_pause_s":    _env_float("PTZ_REACQ_PAUSE_S",  0.20),   # pausa entre pulsos
+    # Zoom automático: solo actúa cuando el dron ya está centrado (ver tracking_worker_service.py)
+    "zoom_auto_enabled": _env_bool("PTZ_ZOOM_AUTO",         True),
+    "zoom_speed":        _env_float("PTZ_ZOOM_SPEED",        0.06),   # zoom muy suave
+    "zoom_bbox_min":     _env_float("PTZ_ZOOM_BBOX_MIN",     0.04),   # bbox < 4%  → acercar
+    "zoom_bbox_max":     _env_float("PTZ_ZOOM_BBOX_MAX",     0.25),   # bbox > 25% → alejar
+    "zoom_duration_s":   _env_float("PTZ_ZOOM_DURATION",     0.15),
     # Continuidad IoU entre frames (RO-06): evita movimientos bruscos por falsos positivos
     "iou_continuity_enabled": _env_bool("PTZ_IOU_CONTINUITY",      True),
     "iou_continuity_min":     _env_float("PTZ_IOU_CONTINUITY_MIN",  0.50),  # RO-06
