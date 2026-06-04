@@ -464,6 +464,7 @@ class LiveVideoProcessor:
         self._last_evidence_saved_at = 0.0
         self._best_evidence_conf_for_active_detection = 0.0
         self._last_evidence_skip_log_at = 0.0
+        self._active_event_id: str | None = None
 
         self._stream_lock = threading.Lock()
         self._latest_jpeg: Optional[bytes] = None
@@ -604,20 +605,17 @@ class LiveVideoProcessor:
         """
         Guarda el frame actual como imagen JPEG de evidencia en disco.
 
-        Política de guardado (evita saturar disco):
+        Política de guardado:
         - Solo guarda si han pasado ``evidence_cooldown_s`` segundos desde la última vez.
         - Solo guarda si la confianza >= ``evidence_min_confidence``.
-        - Durante una detección activa, solo reemplaza si hay mejora de confianza.
-        - Ruta: ``<detections_folder_rel>/evidence_<stamp>_conf<N>.jpg``.
+        - Guarda TODAS las imágenes durante una detección activa en una subcarpeta
+          nombrada con el ID de evento (``<detections_folder_rel>/event_<id>/``).
         - Actualiza ``image_path`` en los dicts de detección (para MetricsDBWriter).
         """
         now = time.time()
-        min_conf = float(clamp(float(STORAGE_CONFIG.get("evidence_min_confidence", 0.85)), 0.10, 1.00))
-        cooldown_s = float(clamp(float(STORAGE_CONFIG.get("evidence_cooldown_s", 5.0)), 1.0, 60.0))
+        min_conf = float(clamp(float(STORAGE_CONFIG.get("evidence_min_confidence", 0.40)), 0.10, 1.00))
+        cooldown_s = float(clamp(float(STORAGE_CONFIG.get("evidence_cooldown_s", 2.0)), 0.5, 60.0))
 
-        # Regla: no guardar evidencia por cada frame.
-        # - cooldown global
-        # - una evidencia por "detección activa" salvo que haya una mejora clara de confianza
         if (now - float(self._last_evidence_saved_at)) < float(cooldown_s):
             return
 
@@ -640,19 +638,19 @@ class LiveVideoProcessor:
                 self._last_evidence_skip_log_at = now
             return
 
-        if self._evidence_saved_for_active_detection and float(best_conf) <= float(self._best_evidence_conf_for_active_detection):
-            # Ya guardamos evidencia para la detección activa y no hay mejora.
-            return
+        # Asignar ID de evento si es la primera captura de esta detección activa.
+        if not self._evidence_saved_for_active_detection or self._active_event_id is None:
+            self._active_event_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
 
-        rel_folder = str(self.deps.detections_folder_rel)
-        rel_folder = rel_folder.replace("\\", "/")
-        abs_folder = os.path.join(self.deps.app_root_path, rel_folder)
+        rel_folder = str(self.deps.detections_folder_rel).replace("\\", "/")
+        event_folder_rel = f"{rel_folder}/event_{self._active_event_id}"
+        abs_folder = os.path.join(self.deps.app_root_path, event_folder_rel)
         os.makedirs(abs_folder, exist_ok=True)
 
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         conf_pct = int(round(float(best_conf) * 100.0))
-        fname = f"evidence_{stamp}_conf{conf_pct:02d}.jpg"
-        rel_path = os.path.join(rel_folder, fname).replace("\\", "/")
+        fname = f"frame_{stamp}_conf{conf_pct:02d}.jpg"
+        rel_path = os.path.join(event_folder_rel, fname).replace("\\", "/")
         abs_path = os.path.join(self.deps.app_root_path, rel_path)
 
         ok = bool(cv2.imwrite(abs_path, frame))
@@ -665,7 +663,7 @@ class LiveVideoProcessor:
         self._evidence_saved_for_active_detection = True
         self._last_evidence_saved_at = now
         self._best_evidence_conf_for_active_detection = float(best_conf)
-        logger.info("evidence saved path=%s conf=%.3f", rel_path, float(best_conf))
+        logger.info("evidence saved event=%s path=%s conf=%.3f", self._active_event_id, rel_path, float(best_conf))
 
     def _update_ui_state(
         self,
@@ -819,6 +817,7 @@ class LiveVideoProcessor:
             else:
                 self._evidence_saved_for_active_detection = False
                 self._best_evidence_conf_for_active_detection = 0.0
+                self._active_event_id = None
 
             if inference_ms is not None and self.metrics_enqueue and self.make_frame_record:
                 try:
