@@ -1,224 +1,405 @@
 # SIRAN — Sistema Integrado de Reconocimiento de Aeronaves No Tripuladas
 
-> **Prototipo de tesis de ingeniería** | Visión artificial + PTZ + Flask  
-> Nombre interno de desarrollo: DEPURA
+> **Prototipo de tesis de Ingeniería Militar en Computación e Informática**  
+> Visión artificial + YOLO + cámara IP/PTZ + RTSP + ONVIF + Flask
 
 ---
 
-## Descripción
+## 1. Descripción general
 
-SIRAN es un prototipo de sistema de visión artificial para la detección, seguimiento, análisis y registro de aeronaves no tripuladas (drones/UAS). Integra:
+SIRAN es un prototipo de software para la detección, seguimiento, análisis y registro de RPAS Micro mediante visión artificial. El sistema está orientado a apoyar actividades de vigilancia y protección mediante una cámara IP/PTZ y un modelo YOLO entrenado para identificar drones en imágenes y video.
 
-- Inferencia YOLO en tiempo real sobre stream RTSP
-- Control automático de cámara PTZ vía ONVIF (tracking del objetivo)
-- Modo de patrullaje/inspección automática
-- Análisis manual de imágenes y videos
-- Registro de eventos de detección con evidencias visuales
-- Interfaz web con autenticación y roles
+El proyecto integra:
 
----
-
-## Tecnologías principales
-
-| Tecnología | Versión | Uso |
-|---|---|---|
-| Python | 3.11+ | Lenguaje principal |
-| Flask | 2.3.x | Framework web |
-| OpenCV | 4.8.x | Procesamiento de video/imagen |
-| Ultralytics YOLO | 8.x | Detección de drones |
-| PyTorch + CUDA | — | Inferencia en GPU |
-| onvif-zeep | 0.2.x | Control PTZ ONVIF |
-| SQLite | — | Base de datos local |
-| FFmpeg | — | Transcodificación de video (opcional) |
+- Detección de RPAS Micro con modelo YOLO entrenado.
+- Procesamiento de video en tiempo real desde cámara RTSP.
+- Confirmación de detecciones por persistencia temporal.
+- Control PTZ manual y seguimiento automático mediante ONVIF.
+- Readquisición PTZ cuando el objetivo se pierde temporalmente.
+- Análisis offline de imágenes y videos.
+- Registro de métricas, eventos, alertas y evidencias visuales.
+- Interfaz web con roles de operador y administrador.
+- Scripts de evaluación para alimentar el Capítulo IV de la tesis.
 
 ---
 
-## Requisitos previos
+## 2. Relación con la tesis
 
-- Python 3.11 o superior
-- (Opcional) GPU NVIDIA con CUDA para inferencia acelerada
-- (Opcional) FFmpeg instalado en el sistema para compatibilidad de video en navegador
-- Cámara IP con soporte RTSP (y ONVIF si se requiere control PTZ)
+Este repositorio corresponde al prototipo desarrollado para la tesis:
+
+**“Prototipo de sistema de visión artificial para la detección de un Sistema de Aeronaves Piloteadas a Distancia Micro, en apoyo a operaciones militares”.**
+
+La correspondencia principal entre tesis y código es la siguiente:
+
+| Elemento de tesis | Implementación en el proyecto |
+|---|---|
+| Captura de video RTSP | `RTSPLatestFrameReader` en `src/video_processor.py` |
+| Inferencia YOLO | `load_yolo_model()` y `LiveVideoProcessor` |
+| Validación por confianza y persistencia | `ModelParamsService` y `DetectionPersistence` |
+| Seguimiento PTZ | `TrackingPTZWorker` y `PTZCommandWorker` |
+| Control ONVIF | `PTZController` y servicios PTZ |
+| Interfaz del operador | `templates/operador.html` y blueprints en `src/routes/` |
+| Panel administrador | `templates/admin.html` y rutas de configuración |
+| Registro de eventos | `DetectionEventWriter`, SQLite y endpoints de eventos |
+| Evaluación experimental | Carpeta `evaluacion/scripts/` |
+| Evidencias para Capítulo IV | `evaluacion/reporte_capitulo4.html`, resultados, curvas y tablas generadas |
 
 ---
 
-## Instalación
+## 3. Estado actual del proyecto
+
+**Estado:** prototipo funcional de investigación.
+
+El sistema ya cuenta con los módulos principales implementados y documentados. Sin embargo, no debe considerarse un sistema de producción sin aplicar mejoras adicionales de seguridad, pruebas automatizadas, endurecimiento de despliegue y limpieza final de deuda técnica.
+
+### Funcionalidades implementadas
+
+| Área | Estado |
+|---|---|
+| Login con roles | Implementado |
+| Visualización en vivo | Implementado |
+| Inferencia YOLO en stream RTSP | Implementado |
+| Parámetros del modelo ajustables en caliente | Implementado |
+| Persistencia temporal para reducir falsos positivos | Implementado |
+| Control PTZ manual | Implementado |
+| Seguimiento automático PTZ | Implementado |
+| Readquisición PTZ | Implementado |
+| Análisis offline de imágenes y videos | Implementado |
+| Exportación y consulta de eventos | Implementado |
+| Gestión básica de dataset recolectado | Implementado |
+| Scripts de evaluación | Implementados |
+| Preparación para producción | Pendiente |
+| Pruebas unitarias completas | Pendiente |
+
+---
+
+## 4. Tecnologías principales
+
+| Tecnología | Uso |
+|---|---|
+| Python 3.11+ | Lenguaje principal |
+| Flask | Aplicación web |
+| Flask-Login | Autenticación y sesiones |
+| Flask-SQLAlchemy | Base de datos de usuarios y cámara |
+| SQLite | Registro local de métricas, eventos y detecciones |
+| OpenCV | Captura, procesamiento y codificación de video |
+| Ultralytics YOLO | Inferencia del modelo de detección |
+| PyTorch + CUDA | Aceleración por GPU |
+| ONVIF / onvif-zeep | Control PTZ interoperable |
+| FFmpeg / imageio-ffmpeg | Conversión de videos para navegador |
+| NumPy / SciPy | Cálculos auxiliares |
+| Pytest | Pruebas futuras |
+
+---
+
+## 5. Requisitos previos
+
+- Python 3.11 o superior.
+- Cámara IP con RTSP.
+- Cámara PTZ compatible con ONVIF si se usará seguimiento automático.
+- GPU NVIDIA con CUDA para inferencia acelerada.
+- FFmpeg instalado o configurado mediante `FFMPEG_BIN` para reproducir videos procesados en navegador.
+
+> El sistema puede caer a CPU si no hay CUDA disponible, pero el rendimiento esperado de tiempo real depende de GPU.
+
+---
+
+## 6. Instalación rápida
 
 ```bash
 # 1. Clonar el repositorio
 git clone https://github.com/AmauriPk/Tesis.git
 cd Tesis
 
-# 2. Crear y activar entorno virtual
+# 2. Crear entorno virtual
 python -m venv venv_new
-# Windows:
-venv_new\Scripts\activate
-# Linux/macOS:
-source venv_new/bin/activate
 
-# 3. Instalar dependencias
+# 3. Activar entorno virtual en Windows
+venv_new\Scripts\activate
+
+# 4. Instalar dependencias
 pip install -r requirements.txt
 
-# 4. Configurar variables de entorno
+# 5. Copiar archivo de configuración
 copy .env.example .env
-# Editar .env con los valores correctos
+```
+
+En Linux/macOS:
+
+```bash
+python -m venv venv_new
+source venv_new/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
 ```
 
 ---
 
-## Configuración
+## 7. Configuración mínima `.env`
 
-Copiar `.env.example` a `.env` y configurar los valores:
+Ejemplo base:
 
 ```env
 # Cámara RTSP
-RTSP_URL=rtsp://IP:554/stream
+RTSP_URL=rtsp://usuario:contraseña@IP_CAMARA:554/Streaming/Channels/101
 RTSP_USERNAME=usuario
 RTSP_PASSWORD=contraseña
+RTSP_TIMEOUT=5
+RTSP_BUFFER_SIZE=1
 
-# Control PTZ (ONVIF)
-ONVIF_HOST=IP_de_la_camara
+# ONVIF / PTZ
+ONVIF_HOST=IP_CAMARA
 ONVIF_PORT=80
-ONVIF_USERNAME=admin
+ONVIF_USERNAME=usuario
 ONVIF_PASSWORD=contraseña
 
 # Modelo YOLO
 YOLO_MODEL_PATH=runs/detect/weights/best.pt
 YOLO_DEVICE=cuda:0
+YOLO_VERBOSE=False
+
+# Parámetros operativos del modelo
+CONFIDENCE_THRESHOLD=0.60
+PERSISTENCE_FRAMES=3
+IOU_THRESHOLD=0.45
+DETECTION_PERSISTENCE_FRAMES=3
+
+# Video
+VIDEO_WIDTH=1280
+VIDEO_HEIGHT=720
+VIDEO_FPS=30
+JPEG_QUALITY=80
+INFERENCE_INTERVAL=1
 
 # Flask
-FLASK_SECRET_KEY=cambia-esta-clave-en-produccion
+FLASK_HOST=0.0.0.0
 FLASK_PORT=5000
+FLASK_DEBUG=False
+SESSION_IDLE_TIMEOUT_SECONDS=900
 
-# Contraseñas de usuarios (CAMBIAR ANTES DE DESPLEGAR)
-DEFAULT_ADMIN_PASSWORD=admin123
-DEFAULT_OPERATOR_PASSWORD=operador123
+# Seguridad
+SIRAN_ENCRYPT_KEY=
+DEFAULT_ADMIN_PASSWORD=cambiar_admin
+DEFAULT_OPERATOR_PASSWORD=cambiar_operador
 ```
 
-> **IMPORTANTE:** Cambiar las contraseñas por defecto antes de usar el sistema en red.
+Para generar una clave de cifrado Fernet:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
 
 ---
 
-## Ejecución
+## 8. Ejecución
 
 ```bash
-# Activar el entorno virtual primero
 venv_new\Scripts\activate
-
-# Iniciar el servidor
 python app.py
 ```
 
-El sistema estará disponible en `http://localhost:5000`
+El sistema quedará disponible en:
 
----
-
-## Usuarios por defecto
-
-| Usuario | Rol | Contraseña por defecto |
-|---|---|---|
-| `admin` | Administrador | `admin123` (cambiar) |
-| `operador` | Operador | `operador123` (cambiar) |
-
----
-
-## Variables de entorno importantes
-
-| Variable | Default | Descripción |
-|---|---|---|
-| `RTSP_URL` | `0` (webcam) | URL del stream RTSP de la cámara |
-| `YOLO_MODEL_PATH` | `runs/detect/weights/best.pt` | Ruta al modelo YOLO entrenado |
-| `YOLO_DEVICE` | `cuda:0` | Device para inferencia (cuda:0 o cpu) |
-| `YOLO_CONFIDENCE` | `0.8` | Umbral de confianza inicial |
-| `FLASK_SECRET_KEY` | `dev-secret` | Clave secreta de Flask (cambiar en producción) |
-| `FFMPEG_BIN` | — | Ruta manual al ejecutable FFmpeg (opcional) |
-| `FLASK_DEBUG` | `False` | Modo debug (nunca True en producción) |
-
----
-
-## Estructura del proyecto
-
+```text
+http://localhost:5000
 ```
-Proyecto01/
-├── app.py                  # Servidor principal Flask
-├── config.py               # Configuración central
-├── requirements.txt        # Dependencias Python
-├── .env.example            # Plantilla de configuración
+
+---
+
+## 9. Usuarios y roles
+
+| Rol | Uso principal |
+|---|---|
+| Administrador | Configurar cámara, parámetros del modelo, dataset y exportación de eventos |
+| Operador | Visualizar video, activar seguimiento, usar PTZ manual y analizar archivos |
+
+> Las contraseñas por defecto deben cambiarse antes de cualquier demostración en red.
+
+---
+
+## 10. Estructura principal del proyecto
+
+```text
+Tesis/
+├── app.py                         # Punto de entrada Flask e inicialización de servicios
+├── config.py                      # Configuración central por variables de entorno
+├── requirements.txt               # Dependencias Python
+├── train.py                       # Entrenamiento del modelo
 ├── src/
-│   ├── system_core.py      # Modelos DB, PTZ, métricas
-│   ├── video_processor.py  # Stream RTSP y procesamiento
-│   └── services/
-│       └── video_export_service.py  # Exportación de video
-├── templates/              # Plantillas HTML (Flask/Jinja2)
-├── static/                 # CSS, JavaScript
-├── docs/
-│   └── tesis/              # Documentación de tesis
-└── instance/               # Base de datos SQLite (generada)
+│   ├── system_core.py             # Modelos, utilidades, PTZ base, métricas
+│   ├── video_processor.py         # RTSP, inferencia en vivo, MJPEG, persistencia
+│   ├── routes/                    # Blueprints Flask
+│   │   ├── analysis.py            # Análisis offline de imagen/video
+│   │   ├── events.py              # Eventos, alertas y exportación CSV
+│   │   ├── dataset.py             # Gestión del dataset recolectado
+│   │   ├── admin_camera.py        # Configuración de cámara
+│   │   ├── auth.py                # Login/logout
+│   │   ├── dashboard.py           # Vista operador y métricas live
+│   │   ├── model_params.py        # Ajuste de parámetros YOLO
+│   │   ├── ptz_manual.py          # Joystick PTZ manual
+│   │   └── automation.py          # Tracking e inspección automática
+│   └── services/                  # Servicios desacoplados
+│       ├── model_params_service.py
+│       ├── yolo_model_service.py
+│       ├── ptz_service.py
+│       ├── ptz_worker_service.py
+│       ├── tracking_worker_service.py
+│       ├── inspection_patrol_service.py
+│       ├── detection_event_service.py
+│       ├── camera_config_service.py
+│       └── video_export_service.py
+├── templates/                     # Interfaz HTML/Jinja2
+├── static/                        # Archivos estáticos de interfaz
+├── docs/                          # Documentación técnica y de tesis
+├── evaluacion/                    # Scripts y reporte del Capítulo IV
+└── instance/                      # Base de datos local generada, no versionar
 ```
 
 ---
 
-## Uso básico
+## 11. Flujo operativo
 
-### Como operador
-1. Iniciar sesión con usuario `operador`
-2. Pestaña **En Vivo**: visualizar stream con detecciones
-3. Activar **Tracking automático** para seguir drones detectados
-4. Pestaña **Análisis Manual**: subir imágenes o videos para análisis offline
-5. Panel de **Alertas**: revisar detecciones recientes con evidencias
+### Operador
 
-### Como administrador
-1. Iniciar sesión con usuario `admin`
-2. Configurar RTSP/ONVIF en el panel de cámara
-3. Ajustar parámetros del modelo YOLO (confianza, IoU)
-4. Gestionar dataset: clasificar imágenes capturadas
-5. Exportar eventos de detección como CSV
+1. Inicia sesión.
+2. Abre el panel de video en vivo.
+3. Verifica conexión RTSP.
+4. Activa seguimiento automático si la cámara es PTZ.
+5. Usa PTZ manual cuando sea necesario.
+6. Revisa alertas recientes y eventos.
+7. Ejecuta análisis offline de imágenes o videos cuando se requiera.
 
----
+### Administrador
 
-## Advertencias de seguridad
-
-- **No usar contraseñas por defecto** (`admin123`, `operador123`) en entornos de red
-- **No exponer el sistema en Internet** sin configurar HTTPS
-- **No subir archivos sensibles** al repositorio: `.env`, `config_camara.json`, `*.db`, `*.pt`
-- El endpoint `/__diag` solo está disponible en modo debug y localhost
+1. Configura RTSP y ONVIF.
+2. Prueba conexión de cámara.
+3. Ajusta confianza, IoU y persistencia.
+4. Consulta eventos históricos.
+5. Exporta registros CSV.
+6. Clasifica imágenes recolectadas para mejora del dataset.
 
 ---
 
-## Archivos que NO deben subirse al repositorio
+## 12. Evaluación para Capítulo IV
 
-Los siguientes archivos están en `.gitignore`:
+La carpeta `evaluacion/scripts/` contiene scripts para obtener evidencias, métricas y tablas de resultados.
 
-```
+| Script | Propósito |
+|---|---|
+| `eval_01_dataset.py` | Composición y validación del dataset |
+| `eval_02_metricas_modelo.py` | Métricas del modelo entrenado |
+| `eval_03_curvas.py` | Curvas de entrenamiento y gráficas |
+| `eval_04_rendimiento_live.py` | FPS y latencia en vivo |
+| `eval_05_sesion_prueba.py` | Registro de sesión experimental |
+| `eval_06_por_distancia.py` | Resultados por distancia |
+| `eval_07_falsos_positivos.py` | Objetos distractores y falsos positivos |
+| `eval_08_iluminacion.py` | Condiciones de iluminación |
+| `eval_09_ptz_tracking.py` | Seguimiento PTZ |
+| `eval_10_cumplimiento_rf.py` | Cumplimiento de requerimientos |
+| `eval_11_reporte_final.py` | Consolidación del reporte final |
+
+---
+
+## 13. Archivos que no deben subirse
+
+El repositorio debe mantenerse ligero. No subir:
+
+```text
 .env
 config_camara.json
-*.db, *.db-shm, *.db-wal
-*.pt, *.pth, *.onnx
-venv_new/
+instance/
 uploads/
+logs/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.mp4
+*.avi
+*.mov
+runs/
+dataset/
+dataset_recoleccion/
+dataset_entrenamiento/
+detections_frames/
 static/results/
 static/evidence/
 static/top_detections/
-dataset_recoleccion/
-dataset_entrenamiento/
-runs/
+venv/
+venv_new/
+```
+
+Antes de hacer `git push`, verificar:
+
+```bash
+git status --short
+git ls-files | findstr /i "\.pt .mp4 .avi .mov .db runs dataset venv"
 ```
 
 ---
 
-## Estado del proyecto
+## 14. Limpieza técnica pendiente
 
-**Estado:** Prototipo funcional de investigación
+Hay análisis previos en `docs/` sobre deuda técnica y código posiblemente muerto. La recomendación actual es no eliminar módulos críticos antes de una defensa o demostración sin ejecutar pruebas.
 
-El sistema está en estado de prototipo. Las funcionalidades principales están implementadas y validadas en condiciones controladas de laboratorio. No está diseñado para despliegue en producción sin las mejoras de seguridad documentadas.
+### Puede revisarse para eliminar después de validar con `grep` y `py_compile`
 
-Ver `docs/tesis/limitaciones_y_alcances.md` para detalles.
+- Funciones PTZ antiguas duplicadas en `app.py`.
+- Helpers no usados en `src/system_core.py`.
+- Funciones PTZ/bbox antiguas en `src/video_processor.py`.
+- Código comentado u obsoleto posterior al refactor.
+- Documentación técnica duplicada o desactualizada en `docs/`.
+
+### No eliminar
+
+- `app.py` como punto de arranque.
+- `config.py`.
+- `src/video_processor.py`.
+- `src/system_core.py`.
+- `src/routes/`.
+- `src/services/tracking_worker_service.py`.
+- `src/services/ptz_worker_service.py`.
+- `src/services/detection_event_service.py`.
+- `src/services/inspection_patrol_service.py`.
+- `evaluacion/scripts/` mientras se esté cerrando el Capítulo IV.
+
+Validación mínima antes de cualquier limpieza:
+
+```bash
+py -m py_compile app.py src/routes/*.py src/services/*.py src/system_core.py src/video_processor.py
+```
 
 ---
 
-## Notas para tesis
+## 15. Seguridad
 
-- Nombre formal del sistema: **SIRAN — Sistema Integrado de Reconocimiento de Aeronaves No Tripuladas**
-- Documentación completa disponible en `docs/tesis/`
-- El refactor del código se realiza de forma incremental; el historial de commits documenta cada paso
-- El análisis de errores y plan de mejoras está en `docs/tesis/analisis_errores_y_mejoras.md`
+- Cambiar contraseñas por defecto.
+- No exponer el servidor directamente a Internet.
+- No activar `FLASK_DEBUG=True` fuera de localhost.
+- Configurar `SIRAN_ENCRYPT_KEY` antes de guardar credenciales reales.
+- No subir `.env`, bases de datos, modelos entrenados ni evidencias.
+- Usar red local controlada durante pruebas.
+
+---
+
+## 16. Documentación útil
+
+| Documento | Contenido |
+|---|---|
+| `docs/Manual_Tecnico_SIRAN.md` | Manual técnico del sistema |
+| `docs/tesis/arquitectura_sistema.md` | Arquitectura para tesis |
+| `docs/tesis/mapa_endpoints.md` | Endpoints del sistema |
+| `docs/tesis/limitaciones_y_alcances.md` | Alcances y limitaciones |
+| `docs/tesis/analisis_errores_y_mejoras.md` | Errores, mejoras y deuda técnica |
+| `docs/analisis_codigo_muerto.md` | Código posiblemente muerto |
+| `docs/plan_limpieza_y_mejora_codigo.md` | Plan de limpieza y mejora |
+
+---
+
+## 17. Nota final
+
+SIRAN es un prototipo académico funcional. Para efectos de tesis, el sistema debe presentarse como una solución experimental viable, validada en condiciones controladas y con limitaciones identificadas. Para uso operativo real, requiere endurecimiento, pruebas de campo ampliadas, validación con más condiciones ambientales y revisión institucional de seguridad.
