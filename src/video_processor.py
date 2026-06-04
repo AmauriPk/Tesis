@@ -464,7 +464,6 @@ class LiveVideoProcessor:
         self._last_evidence_saved_at = 0.0
         self._best_evidence_conf_for_active_detection = 0.0
         self._last_evidence_skip_log_at = 0.0
-        self._active_event_id: str | None = None
 
         self._stream_lock = threading.Lock()
         self._latest_jpeg: Optional[bytes] = None
@@ -638,19 +637,14 @@ class LiveVideoProcessor:
                 self._last_evidence_skip_log_at = now
             return
 
-        # Asignar ID de evento si es la primera captura de esta detección activa.
-        if not self._evidence_saved_for_active_detection or self._active_event_id is None:
-            self._active_event_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-
         rel_folder = str(self.deps.detections_folder_rel).replace("\\", "/")
-        event_folder_rel = f"{rel_folder}/event_{self._active_event_id}"
-        abs_folder = os.path.join(self.deps.app_root_path, event_folder_rel)
+        abs_folder = os.path.join(self.deps.app_root_path, rel_folder)
         os.makedirs(abs_folder, exist_ok=True)
 
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         conf_pct = int(round(float(best_conf) * 100.0))
-        fname = f"frame_{stamp}_conf{conf_pct:02d}.jpg"
-        rel_path = os.path.join(event_folder_rel, fname).replace("\\", "/")
+        fname = f"evidence_{stamp}_conf{conf_pct:02d}.jpg"
+        rel_path = os.path.join(rel_folder, fname).replace("\\", "/")
         abs_path = os.path.join(self.deps.app_root_path, rel_path)
 
         ok = bool(cv2.imwrite(abs_path, frame))
@@ -663,7 +657,7 @@ class LiveVideoProcessor:
         self._evidence_saved_for_active_detection = True
         self._last_evidence_saved_at = now
         self._best_evidence_conf_for_active_detection = float(best_conf)
-        logger.info("evidence saved event=%s path=%s conf=%.3f", self._active_event_id, rel_path, float(best_conf))
+        logger.info("evidence saved path=%s conf=%.3f", rel_path, float(best_conf))
 
     def _update_ui_state(
         self,
@@ -817,7 +811,6 @@ class LiveVideoProcessor:
             else:
                 self._evidence_saved_for_active_detection = False
                 self._best_evidence_conf_for_active_detection = 0.0
-                self._active_event_id = None
 
             if inference_ms is not None and self.metrics_enqueue and self.make_frame_record:
                 try:
